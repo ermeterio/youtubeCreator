@@ -1,0 +1,22 @@
+# Ambiente Python
+.venv/
+__pycache__/
+*.pyc
+
+# Credenciais OAuth reais - NUNCA versionar
+secrets/
+
+# Dados gerados/estado local - específicos da máquina, não do código
+data/catalog.db
+data/output/
+data/assets/nasa_cache/
+data/logs/
+data/backups/
+
+# Arquivos temporários do MoviePy (renderização em andamento)
+*TEMP_MPY*
+videoTEMP*.mp4
+
+# Editor / OS
+.claude/
+.vscode/
