@@ -171,7 +171,16 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
     thumb_path = work_dir / "thumbnail.jpg"
     if not thumb_path.exists():
         thumbnail.build_thumbnail(assets[0], title, thumb_path, credit_label=language["credit_label"])
-    catalog.update_track(track_id, thumbnail_path=str(thumb_path), status="pending_review")
+    # Variante B pro teste A/B de thumbnail (ver health.run_thumbnail_ab_tests):
+    # imagem diferente (a 2ª melhor, se houver) + paleta deslocada, pra ser
+    # visualmente distinta de verdade, não só um filtro sutil.
+    thumb_b_path = work_dir / "thumbnail_b.jpg"
+    if not thumb_b_path.exists():
+        alt_asset = assets[1] if len(assets) > 1 else assets[0]
+        thumbnail.build_thumbnail(alt_asset, title, thumb_b_path, credit_label=language["credit_label"],
+                                   palette_offset=1)
+    catalog.update_track(track_id, thumbnail_path=str(thumb_path), thumbnail_b_path=str(thumb_b_path),
+                          status="pending_review")
 
     print(f"[canal {channel['name']} | track {track_id}] pronto para revisão.")
     print(f"  Título: {title}")
@@ -197,6 +206,7 @@ def run_all_active_channels() -> list[int]:
     try:
         from pipeline import health
         health.check_channels_health()
+        health.run_thumbnail_ab_tests()
     except Exception as exc:
         notify.log(f"Checagem de saúde dos canais falhou (não bloqueia a geração): {exc}")
 
@@ -228,7 +238,10 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
         token_path=channels.token_path(channel["slug"]),
         thumbnail_path=track["thumbnail_path"], privacy_status=privacy_status,
     )
-    catalog.update_track(track_id, youtube_video_id=video_id, status="uploaded")
+    catalog.update_track(
+        track_id, youtube_video_id=video_id, status="uploaded",
+        published_at=datetime.now(timezone.utc).isoformat(),
+    )
     return video_id
 
 

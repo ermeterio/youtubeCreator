@@ -1412,6 +1412,15 @@ def video_detail(track_id: int):
     elif track["feedback"] == "disliked":
         feedback_badge = '<span class="badge missing">👎 marcado pra evitar</span>'
 
+    ab_state = track["active_thumbnail"] if "active_thumbnail" in track.keys() else None
+    ab_badge = {
+        "a": "",
+        None: "",
+        "b": '<span class="badge inactive">🅰️🅱️ teste de thumbnail: rodando variante B</span>',
+        "b_confirmed": '<span class="badge ok">🅱️ venceu o teste A/B de thumbnail</span>',
+        "a_confirmed": '<span class="badge ok">🅰️ venceu o teste A/B de thumbnail (voltou pra A)</span>',
+    }.get(ab_state, "")
+
     llm_response = ""
     consult_pending = _consult_status.get(track_id)
     if consult_pending:
@@ -1450,7 +1459,7 @@ def video_detail(track_id: int):
     body = f"""
     <p><a href="{url_for('list_videos')}">&larr; Voltar para a lista</a></p>
     <h2>{track['title']}</h2>
-    <p>{_status_badge(track['status'])} {_fact_check_badge(track['fact_check_flag'])} {feedback_badge}
+    <p>{_status_badge(track['status'])} {_fact_check_badge(track['fact_check_flag'])} {feedback_badge} {ab_badge}
        <span class="badge inactive">canal: {channel['name']}</span>
        {f'<span class="badge inactive">série: {track["series"]}</span>' if track['series'] else ''}
     </p>

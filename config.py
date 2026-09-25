@@ -39,6 +39,13 @@ YOUTUBE_UPLOAD_SCOPES = [
 VIDEO_RESOLUTION = (1920, 1080)
 VIDEO_FPS = 30
 
+# Teste A/B de thumbnail: dias de espera antes de trocar pra variante B (dar
+# tempo de acumular impressões reais), mínimo de impressões pra considerar o
+# CTR estatisticamente minimamente confiável, e dias de espera após a troca
+# antes de comparar B contra A e decidir qual fica.
+THUMBNAIL_AB_TEST_WAIT_DAYS = 3
+THUMBNAIL_AB_MIN_IMPRESSIONS = 200
+
 # Duração máxima do Short - o Short agora é um RECORTE do vídeo longo (mesmo
 # roteiro/narração/Ken Burns até esse ponto), não uma renderização paralela
 # desconectada. 58s fica dentro do limite clássico de Shorts (60s) com uma

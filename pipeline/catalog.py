@@ -80,6 +80,10 @@ _MIGRATION_COLUMNS = {
         "feedback_action": "TEXT",
         "clarity_review": "TEXT",
         "fact_check_details": "TEXT",
+        "thumbnail_b_path": "TEXT",
+        "active_thumbnail": "TEXT NOT NULL DEFAULT 'a'",
+        "published_at": "TEXT",
+        "thumbnail_rotated_at": "TEXT",
     },
     "channels": {
         "series_primary": "TEXT NOT NULL DEFAULT 'Direto da Fonte'",

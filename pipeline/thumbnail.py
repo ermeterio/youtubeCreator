@@ -34,8 +34,12 @@ def palette_for(title: str):
 
 
 def build_thumbnail(main_asset: VisualAsset, title: str, output_path: Path,
-                     font_path: str | None = None, credit_label: str = "Crédito") -> Path:
+                     font_path: str | None = None, credit_label: str = "Crédito",
+                     palette_offset: int = 0) -> Path:
     bg_color, text_color = palette_for(title)
+    if palette_offset:
+        idx = (PALETTES.index((bg_color, text_color)) + palette_offset) % len(PALETTES)
+        bg_color, text_color = PALETTES[idx]
 
     base = Image.open(main_asset.local_path).convert("RGBA").resize(THUMB_SIZE)
     overlay = Image.new("RGBA", THUMB_SIZE, bg_color + (90,))

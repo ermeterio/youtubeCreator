@@ -12,7 +12,8 @@ from googleapiclient.discovery import build
 
 from pipeline.youtube_upload import _get_credentials
 
-METRICS = "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,likes,comments,subscribersGained"
+METRICS = ("views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,likes,comments,"
+           "subscribersGained,videoThumbnailImpressions,videoThumbnailImpressionsClickRate")
 
 METRIC_LABELS = {
     "views": "Visualizações",
@@ -22,6 +23,11 @@ METRIC_LABELS = {
     "likes": "Likes",
     "comments": "Comentários",
     "subscribersGained": "Inscritos ganhos",
+    # Disponíveis na Analytics API v2 desde 15/01/2026 - antes eram exclusivas
+    # do YouTube Studio, sem equivalente via API (é o que destravou o teste
+    # A/B de thumbnail - ver pipeline.health.run_thumbnail_ab_tests).
+    "videoThumbnailImpressions": "Impressões da thumbnail",
+    "videoThumbnailImpressionsClickRate": "CTR da thumbnail (%)",
 }
 
 
@@ -74,9 +80,18 @@ def video_metrics(client_secret_path: Path, token_path: Path, days: int = 28, ma
 
 
 def video_metrics_single(client_secret_path: Path, token_path: Path, video_id: str, days: int = 28) -> dict:
-    service = _build_service(client_secret_path, token_path)
     end = date.today()
     start = end - timedelta(days=days)
+    return video_metrics_single_range(client_secret_path, token_path, video_id, start, end)
+
+
+def video_metrics_single_range(client_secret_path: Path, token_path: Path, video_id: str,
+                                start: date, end: date) -> dict:
+    """Métricas de 1 vídeo num intervalo de datas específico (não só "últimos
+    N dias") - usado pro teste A/B de thumbnail comparar o período ANTES da
+    troca (variante A) contra o período DEPOIS (variante B) sem misturar os
+    dois numa média só."""
+    service = _build_service(client_secret_path, token_path)
     response = service.reports().query(
         ids="channel==MINE",
         startDate=start.isoformat(),

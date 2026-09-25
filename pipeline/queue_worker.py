@@ -43,6 +43,26 @@ def _loop() -> None:
             time.sleep(5)
 
 
+def _recover_stale_running_items() -> None:
+    """Se o processo anterior morreu (restart do servidor, queda, etc.) no
+    meio de um item da fila, ele fica preso em status='running' pra sempre -
+    o worker só busca 'pending', nunca reclama 'running' travado. Como isso
+    roda ANTES da própria thread desse processo começar a processar, todo
+    'running' encontrado aqui é necessariamente órfão de um processo
+    anterior (não pode ser um item que ESTE processo está processando agora,
+    porque a thread ainda nem começou). Aconteceu de verdade num restart
+    seguido de outro - 2 itens ficaram presos até serem resetados na mão."""
+    with catalog.get_conn() as conn:
+        stale = conn.execute("SELECT id, topic_label FROM generation_queue WHERE status = 'running'").fetchall()
+        for row in stale:
+            conn.execute(
+                "UPDATE generation_queue SET status = 'pending', started_at = NULL WHERE id = ?", (row["id"],)
+            )
+    for row in stale:
+        notify.log(f"Fila: item \"{row['topic_label']}\" estava travado em 'running' de um processo "
+                   "anterior - resetado pra 'pending', será reprocessado do zero.")
+
+
 def ensure_worker_started() -> None:
     """Garante que a thread da fila está rodando - idempotente, chamar
     quantas vezes quiser (ex.: a cada request que mexe na fila) sem criar
@@ -51,5 +71,6 @@ def ensure_worker_started() -> None:
     with _lock:
         if _worker_started:
             return
+        _recover_stale_running_items()
         threading.Thread(target=_loop, daemon=True).start()
         _worker_started = True

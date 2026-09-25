@@ -114,12 +114,25 @@ def upload_video(video_path: Path, title: str, description: str,
     video_id = response["id"]
 
     if thumbnail_path is not None:
-        youtube.thumbnails().set(
-            videoId=video_id,
-            media_body=MediaFileUpload(str(thumbnail_path), mimetype="image/jpeg"),
-        ).execute()
+        set_thumbnail(video_id, thumbnail_path, client_secret_path, token_path, creds=creds)
 
     return video_id
+
+
+def set_thumbnail(video_id: str, thumbnail_path: Path, client_secret_path: Path, token_path: Path,
+                   creds: Credentials | None = None) -> None:
+    """Troca a thumbnail de um vídeo JÁ publicado - usado tanto no upload
+    inicial quanto no teste A/B de thumbnail (ver pipeline.health), que
+    troca pra variante B alguns dias depois de publicar e compara CTR real
+    (videoThumbnailImpressionsClickRate, disponível na Analytics API desde
+    jan/2026) antes/depois da troca."""
+    if creds is None:
+        creds = _get_credentials(client_secret_path, token_path)
+    youtube = build("youtube", "v3", credentials=creds)
+    youtube.thumbnails().set(
+        videoId=video_id,
+        media_body=MediaFileUpload(str(thumbnail_path), mimetype="image/jpeg"),
+    ).execute()
 
 
 def list_channel_videos(client_secret_path: Path, token_path: Path, max_results: int = 50) -> list[dict]:
