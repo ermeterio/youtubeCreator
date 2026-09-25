@@ -20,6 +20,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import config
 from pipeline import audio_post, backup, catalog, channels, narration, notify, script_gen, thumbnail, video_build, visual_source, youtube_upload
 
 # Status em que o track já passou por roteiro+imagens+narração (a parte cara:
@@ -143,13 +144,17 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
                                  credit_label=language["credit_label"], cta_text=language["cta_text"])
         catalog.update_track(track_id, video_path=str(video_path), status="video_ready")
 
-    # Versão vertical (Shorts) - mesma narração/legendas/imagens, reenquadradas
-    # em 9:16. Maior alavanca de alcance orgânico disponível hoje: o gate de
-    # revisão humana continua valendo, ver approve_and_upload_short().
+    # Short = RECORTE do vídeo longo (mesmo roteiro/narração/Ken Burns até o
+    # ponto de corte, reenquadrado em 9:16), não uma renderização paralela
+    # desconectada - relação editorial clara com o vídeo longo, que é o que a
+    # política do YouTube (2026) trata como uso legítimo de Shorts (ver
+    # ROADMAP.md). O gate de revisão humana continua valendo, ver
+    # approve_and_upload_short().
     short_path = work_dir / "short.mp4"
     if not short_path.exists():
         video_build.build_video(narration_path, title, assets, short_path, vertical=True, captions=boundaries,
-                                 credit_label=language["credit_label"], cta_text=language["cta_text"])
+                                 credit_label=language["credit_label"], cta_text=language["cta_text"],
+                                 max_duration=config.SHORT_MAX_DURATION_SECONDS)
         catalog.update_track(track_id, video_vertical_path=str(short_path))
 
     thumb_path = work_dir / "thumbnail.jpg"

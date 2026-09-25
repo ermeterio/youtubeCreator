@@ -155,7 +155,7 @@ BASE_TEMPLATE = """
 <h1>YouTube Content Creator</h1>
 <nav>
   <a href="/" class="{{ 'active' if active_nav == 'channels' else '' }}">Canais e credenciais</a>
-  <a href="/videos" class="{{ 'active' if active_nav == 'videos' else '' }}">Vídeos gerados</a>
+  <a href="/videos" class="{{ 'active' if active_nav == 'videos' else '' }}">Vídeos{{ ' (' + pending_count|string + ' p/ publicar no YouTube)' if pending_count else '' }}</a>
   <a href="/reports" class="{{ 'active' if active_nav == 'reports' else '' }}">📈 Relatório por série</a>
 </nav>
 {% with messages = get_flashed() %}
@@ -180,7 +180,13 @@ def get_flashed():
 
 
 def _render(body: str, active_nav: str = "channels"):
-    return render_template_string(BASE_TEMPLATE, body=body, get_flashed=get_flashed, active_nav=active_nav)
+    try:
+        pending_count = catalog.count_pending_review()
+    except Exception:
+        pending_count = 0
+    return render_template_string(
+        BASE_TEMPLATE, body=body, get_flashed=get_flashed, active_nav=active_nav, pending_count=pending_count
+    )
 
 
 def _is_valid_oauth_secret(slug: str) -> bool:
@@ -707,7 +713,7 @@ def _video_grid_html(channel_id: int) -> str:
         if t["status"] == "pending_review":
             modal_actions += f"""
             <form class="inline" method="post" action="{url_for('approve_video', track_id=t['id'])}" style="display:inline-flex; align-items:center;">
-              <button type="submit">Aprovar e publicar vídeo</button>
+              <button type="submit">📤 Publicar no YouTube</button>
               {_privacy_select(f'modal_privacy_video_{t["id"]}')}
             </form>
             <form class="inline" method="post" action="{url_for('reject_video', track_id=t['id'])}">
@@ -717,7 +723,7 @@ def _video_grid_html(channel_id: int) -> str:
         if has_short and not t["youtube_short_video_id"] and t["status"] in ("pending_review", "video_ready", "uploaded"):
             modal_actions += f"""
             <form class="inline" method="post" action="{url_for('approve_short', track_id=t['id'])}" style="display:inline-flex; align-items:center;">
-              <button type="submit" class="secondary">Aprovar e publicar Short</button>
+              <button type="submit" class="secondary">📤 Publicar Short no YouTube</button>
               {_privacy_select(f'modal_privacy_short_{t["id"]}')}
             </form>
             """
@@ -1155,8 +1161,8 @@ STATUS_LABELS = {
     "planned": "planejado",
     "narration_ready": "narração pronta",
     "video_ready": "vídeo montado",
-    "pending_review": "aguardando revisão",
-    "uploaded": "publicado",
+    "pending_review": "🔴 pronto - publicar no YouTube",
+    "uploaded": "✅ publicado no YouTube",
     "rejected": "rejeitado",
 }
 
@@ -1184,7 +1190,10 @@ def _fact_check_badge(flag: str | None) -> str:
 
 
 def _privacy_select(field_id: str = "privacy_status") -> str:
+    # "Visibilidade" (não "privacidade") - termo que o YouTube Studio usa pra
+    # essa mesma opção, pra quem já usa o YouTube reconhecer de cara.
     return f"""
+    <label for="{field_id}" class="muted" style="font-size:0.8rem; margin-left:4px;">Visibilidade:</label>
     <select name="privacy_status" id="{field_id}" style="width:auto; display:inline-block; margin:0 8px;">
       <option value="private">🔒 Privado</option>
       <option value="unlisted">🔗 Não listado</option>
@@ -1276,12 +1285,12 @@ def batch_review():
             <p class="muted" style="max-height:60px; overflow:hidden;">{t['script'][:220]}...</p>
             <form class="inline" method="post" action="{url_for('approve_video', track_id=t['id'])}" style="display:inline-flex; align-items:center;">
               <input type="hidden" name="return_to" value="review">
-              <button type="submit">Aprovar vídeo</button>
+              <button type="submit">📤 Publicar no YouTube</button>
               {_privacy_select(f'privacy_video_{t["id"]}')}
             </form>
             {f'''<form class="inline" method="post" action="{url_for('approve_short', track_id=t['id'])}" style="display:inline-flex; align-items:center;">
               <input type="hidden" name="return_to" value="review">
-              <button type="submit" class="secondary">Aprovar Short</button>
+              <button type="submit" class="secondary">📤 Publicar Short no YouTube</button>
               {_privacy_select(f'privacy_short_{t["id"]}')}
             </form>''' if has_short else ''}
             <form class="inline" method="post" action="{url_for('reject_video', track_id=t['id'])}">
@@ -1365,7 +1374,7 @@ def video_detail(track_id: int):
     if track["status"] == "pending_review":
         actions += f"""
         <form class="inline" method="post" action="{url_for('approve_video', track_id=track_id)}" style="display:inline-flex; align-items:center;">
-          <button type="submit">Aprovar e publicar vídeo</button>
+          <button type="submit">📤 Publicar no YouTube</button>
           {_privacy_select('privacy_video')}
         </form>
         <form class="inline" method="post" action="{url_for('reject_video', track_id=track_id)}">
@@ -1375,7 +1384,7 @@ def video_detail(track_id: int):
     if has_short and not track["youtube_short_video_id"] and track["status"] in ("pending_review", "video_ready", "uploaded"):
         actions += f"""
         <form class="inline" method="post" action="{url_for('approve_short', track_id=track_id)}" style="display:inline-flex; align-items:center;">
-          <button type="submit" class="secondary">Aprovar e publicar Short</button>
+          <button type="submit" class="secondary">📤 Publicar Short no YouTube</button>
           {_privacy_select('privacy_short')}
         </form>
         """

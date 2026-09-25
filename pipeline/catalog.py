@@ -165,6 +165,16 @@ def list_tracks(channel_id: int | None = None, limit: int = 200) -> list[sqlite3
         return conn.execute(query, params).fetchall()
 
 
+def count_pending_review() -> int:
+    """Quantos vídeos estão prontos e esperando só a publicação no YouTube -
+    usado pra mostrar um contador na navegação (padrão familiar de quem usa
+    o YouTube Studio: contagem de itens pendentes visível sem precisar
+    entrar em cada canal pra descobrir)."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM tracks WHERE status = 'pending_review'").fetchone()
+    return row["n"]
+
+
 def feedback_examples(channel_id: int, feedback: str, limit: int = 5) -> list[sqlite3.Row]:
     """Últimos tracks do canal com essa avaliação (`liked`/`disliked`) - usado
     pra montar exemplos reais no prompt do roteirista (ver script_gen.py),
