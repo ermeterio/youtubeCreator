@@ -122,6 +122,16 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         track_id = catalog.create_track(title, topic, script, ", ".join(credits), channel_id=channel["id"])
         catalog.update_track(track_id, fact_check_flag=fact_check, series=series)
 
+        # Segunda passada do LLM simulando um espectador leigo - sinaliza
+        # trechos confusos/redundantes ANTES da revisão humana, sem travar o
+        # pipeline se o Ollama não responder.
+        try:
+            clarity = script_gen.clarity_review(script, channel["niche"] or "ciência")
+            if clarity:
+                catalog.update_track(track_id, clarity_review=clarity)
+        except Exception:
+            pass
+
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         work_dir = channels.output_dir(channel["slug"]) / f"{stamp}_{track_id}"
 

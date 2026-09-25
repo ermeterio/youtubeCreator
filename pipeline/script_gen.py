@@ -108,6 +108,39 @@ ATENCAO se pelo menos uma afirmação não está rastreável à fonte>
 DETALHES: <lista curta das afirmações e se estão presentes ou ausentes>
 """
 
+CLARITY_REVIEW_TEMPLATE = """Você é um espectador leigo, curioso mas SEM formação em {niche} - nunca
+estudou o assunto, só assiste vídeos curtos de ciência por curiosidade. Leia o roteiro abaixo como
+se fosse a primeira vez que ouve falar disso.
+
+ROTEIRO:
+---
+{script}
+---
+
+Aponte, em até 3 itens curtos, trechos que você (nesse papel de leigo) acharia CONFUSOS (termo
+técnico sem explicação, salto lógico, frase longa demais) ou EXCESSIVAMENTE EXPLICADOS (redundante,
+pode entediar quem já entendeu no início). Se o roteiro estiver claro o bastante pra um leigo do
+início ao fim, diga isso.
+
+Responda EXATAMENTE neste formato, sem texto antes ou depois:
+RISCOS: <lista curta de trechos problemáticos com motivo, ou "nenhum - roteiro claro pra leigo" se não houver>
+"""
+
+
+def clarity_review(script: str, niche: str = "ciência") -> str | None:
+    """Segunda passada do LLM local simulando um espectador leigo lendo o
+    roteiro antes da revisão humana - sinaliza trechos confusos ou
+    redundantes pro revisor não precisar achar isso sozinho. Complementa o
+    fact-check (que checa PRECISÃO) com um checador de CLAREZA. Retorna None
+    se o Ollama não responder - é um reforço opcional pro revisor, nunca
+    bloqueia o pipeline."""
+    prompt = CLARITY_REVIEW_TEMPLATE.format(script=script, niche=niche)
+    text = _call_ollama(prompt, timeout=90)
+    if not text or not _has_marker(text, "RISCOS:"):
+        return None
+    return _split_at_marker(text, "RISCOS:")[1].strip()
+
+
 REVIEW_TEMPLATE = """Você é o roteirista responsável por melhorar os próximos vídeos de um canal
 automatizado do YouTube sobre {niche}. O dono do canal revisou um vídeo já publicado/gerado e
 deixou uma observação sobre ele.
@@ -449,11 +482,12 @@ TEMAS QUE O CANAL JÁ USA NA ROTAÇÃO PADRÃO:
 
 TEMAS JÁ NARRADOS RECENTEMENTE (evite repetir estes, mesmo que reformulados):
 {recent_topics}
-
+{comments_section}
 Sugira {count} ideias de vídeo NOVAS, em {language_name}, que façam sentido pra esse canal.
 Pode incluir variações mais específicas dos temas que o canal já cobre, MAS também pode sugerir
 assuntos adjacentes/relacionados que ainda não estão na lista - contanto que fiquem claramente
-alinhados com a proposta do canal ("{niche}"). Não repita os temas recentes listados acima.
+alinhados com a proposta do canal ("{niche}"). Não repita os temas recentes listados acima. Se
+houver perguntas/pedidos reais do público listados acima, priorize temas que respondam a eles.
 
 Responda EXATAMENTE neste formato, sem texto antes ou depois:
 SUGESTOES:
@@ -461,6 +495,27 @@ SUGESTOES:
 <rótulo do tema 2, em {language_name}> | <termo de busca em inglês 2>
 (... até {count} linhas)
 """
+
+
+def _recent_comments_section(channel: sqlite3.Row, limit: int = 25) -> str:
+    """Puxa comentários reais recentes do canal no YouTube (quando já
+    autorizado) como sinal de pauta - o que o público está de fato
+    perguntando/pedindo, em vez de só o LLM inventando tema no vácuo. Falha
+    silenciosa (string vazia) se o canal não estiver conectado ou a API
+    negar - é só um reforço opcional do prompt de sugestão de temas."""
+    try:
+        secret_path = channels.client_secret_path(channel["slug"])
+        token_path = channels.token_path(channel["slug"])
+        if not token_path.exists():
+            return ""
+        from pipeline import youtube_upload
+        comments = youtube_upload.list_recent_comments(secret_path, token_path, max_results=limit)
+        if not comments:
+            return ""
+        sample = "\n".join(f"- {c[:180]}" for c in comments[:limit])
+        return f"\nCOMENTÁRIOS/PERGUNTAS REAIS RECENTES DO PÚBLICO NO CANAL:\n{sample}\n"
+    except Exception:
+        return ""
 
 
 def suggest_topics(channel: sqlite3.Row, count: int = 8) -> list[tuple[str, str]]:
@@ -478,6 +533,7 @@ def suggest_topics(channel: sqlite3.Row, count: int = 8) -> list[tuple[str, str]
         niche=niche,
         existing_topics="\n".join(f"- {label}" for label, _ in existing) or "(nenhum cadastrado ainda)",
         recent_topics="\n".join(f"- {t}" for t in recent) or "(nenhum vídeo gerado ainda)",
+        comments_section=_recent_comments_section(channel),
         count=count,
         language_name=language["llm_language_name"],
     )

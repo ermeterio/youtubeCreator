@@ -1396,6 +1396,14 @@ def video_detail(track_id: int):
             "correspondência clara nos fatos-fonte. Confira o roteiro com atenção antes de aprovar.</div>"
         )
 
+    clarity_note = ""
+    clarity_text = track["clarity_review"] if "clarity_review" in track.keys() else None
+    if clarity_text and not clarity_text.lower().startswith("nenhum"):
+        clarity_note = (
+            '<div class="panel warn"><b>👁 Revisão de clareza (persona leigo, gerada por IA):</b><br>'
+            f"{clarity_text}</div>"
+        )
+
     feedback_badge = ""
     if track["feedback"] == "liked":
         feedback_badge = '<span class="badge ok">👍 aprovado como exemplo</span>'
@@ -1445,6 +1453,7 @@ def video_detail(track_id: int):
        {f'<span class="badge inactive">série: {track["series"]}</span>' if track['series'] else ''}
     </p>
     {fact_check_note}
+    {clarity_note}
     {youtube_link}
     {metrics_panel}
     {actions}

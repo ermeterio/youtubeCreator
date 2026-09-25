@@ -211,6 +211,41 @@ def authorize_and_identify(client_secret_path: Path, token_path: Path, force_new
     }
 
 
+def list_recent_comments(client_secret_path: Path, token_path: Path, max_results: int = 50) -> list[str]:
+    """Comentários recentes de QUALQUER vídeo do canal - usado como sinal de
+    pauta real (o que o público está perguntando/pedindo), não só tema
+    inventado pelo LLM. Só o texto do comentário top-level interessa aqui
+    (não respostas), então usa commentThreads.list em vez de comments.list.
+    Falha graciosamente (lista vazia) se comentários estiverem desativados
+    ou a API negar - isso é só um insumo extra pro gerador de temas, nunca
+    pode travar o fluxo principal."""
+    creds = _get_credentials(client_secret_path, token_path)
+    youtube = build("youtube", "v3", credentials=creds)
+    channel_response = youtube.channels().list(part="id", mine=True).execute()
+    items = channel_response.get("items", [])
+    if not items:
+        return []
+    channel_id = items[0]["id"]
+
+    try:
+        response = youtube.commentThreads().list(
+            part="snippet",
+            allThreadsRelatedToChannelId=channel_id,
+            order="time",
+            maxResults=min(max_results, 100),
+            textFormat="plainText",
+        ).execute()
+    except Exception:
+        return []
+
+    comments = []
+    for item in response.get("items", []):
+        text = item["snippet"]["topLevelComment"]["snippet"].get("textDisplay", "").strip()
+        if text:
+            comments.append(text)
+    return comments
+
+
 def delete_video(video_id: str, client_secret_path: Path, token_path: Path) -> None:
     creds = _get_credentials(client_secret_path, token_path)
     youtube = build("youtube", "v3", credentials=creds)

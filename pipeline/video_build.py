@@ -282,6 +282,20 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
     sequence = concatenate_videoclips(clips, method="compose", padding=-CROSSFADE_DURATION)
     sequence = sequence.subclipped(0, full_duration).with_audio(audio)
 
+    step = per_image_duration - CROSSFADE_DURATION
+    all_cut_times = [i * step for i in range(1, len(assets))]
+
+    # Se for um corte de verdade (Short com max_duration < vídeo completo),
+    # ajusta o ponto de corte pra cair bem em cima de uma troca de imagem já
+    # planejada, em vez de cortar no meio de um crossfade - evita um corte
+    # visualmente abrupto/estranho. Só ajusta se a troca de imagem mais
+    # próxima não encurtar o Short em mais de 25% do alvo (senão mantém o
+    # corte no tempo pedido mesmo).
+    if max_duration and target_duration < full_duration:
+        earlier = [t for t in all_cut_times if t <= target_duration]
+        if earlier and earlier[-1] >= target_duration * 0.75:
+            target_duration = earlier[-1]
+
     title_clip = (
         _safe_text_clip(title, config.FONT_TITLE, 54 if vertical else 60, stroke_width=2,
                         max_width=int(w * 0.85), color="white", stroke_color="black")
@@ -289,8 +303,7 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
         .with_duration(min(6, target_duration))
     )
 
-    step = per_image_duration - CROSSFADE_DURATION
-    cut_times = [i * step for i in range(1, len(assets)) if i * step < target_duration]
+    cut_times = [t for t in all_cut_times if t < target_duration]
 
     captions_in_range = [c for c in captions if c["start"] < target_duration] if captions else None
 
