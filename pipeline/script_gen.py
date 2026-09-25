@@ -535,6 +535,97 @@ def _fact_check(script: str, facts: str) -> str:
     return "ok" if result_line.startswith("OK") else "atencao"
 
 
+_NEWS_IMAGE_VOCAB = {
+    "hubble", "webb", "jwst", "iss", "mars", "moon", "venus", "jupiter", "saturn",
+    "mercury", "neptune", "uranus", "pluto", "galaxy", "nebula", "comet", "asteroid",
+    "rocket", "satellite", "telescope", "station", "launch", "mission", "orbit",
+    "astronaut", "sun", "solar", "lunar", "meteor", "planet", "star", "esa", "nasa",
+    "spacex", "starship", "artemis", "supernova", "eclipse", "spacewalk",
+}
+
+
+def _news_image_keywords(title: str) -> list[str]:
+    """Extrai termos concretos e prováveis de dar match na busca de imagem
+    (NASA/ESA) a partir de um título de notícia em inglês - usar o título
+    inteiro como query falha quase sempre (a busca da NASA é por texto
+    literal em metadado, não semântica). Prioriza nomes próprios (sequências
+    de palavras capitalizadas: "Vera Rubin", "James Webb"), siglas
+    (instrumentos/agências: NASA, ESA, JWST) e vocabulário conhecido de
+    astronomia/espaço que aparece na frase."""
+    keywords = []
+    keywords += re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", title)
+    keywords += re.findall(r"\b[A-Z]{2,6}\b", title)
+    words = re.findall(r"[A-Za-z][A-Za-z']*", title)
+    keywords += [w for w in words if w.lower() in _NEWS_IMAGE_VOCAB]
+
+    seen = set()
+    unique = []
+    for k in keywords:
+        key = k.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(k)
+    return unique[:5]
+
+
+def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | None:
+    """Fallback de conteúdo por notícia real recente (Spaceflight News API),
+    tentado ANTES de cair no tema genérico fixo da rotação - dá ao canal
+    conteúdo atual/factual em vez de só reciclar a mesma lista de temas.
+    Só usa a notícia se a busca de imagem pra ela realmente encontrar pelo
+    menos 2 imagens reais (NASA/ESA) - sem isso, cai silenciosamente pra
+    próxima notícia, e se nenhuma render imagem, retorna None pro chamador
+    seguir pro fallback de tema rotativo de sempre. Também evita repetir
+    notícia cujo título já apareceu num tema recente do canal."""
+    try:
+        articles = visual_source.fetch_recent_space_news(limit=10)
+    except Exception:
+        return None
+
+    recent = list(catalog.recent_topics(channel["id"], lookback=15))
+    for article in articles:
+        title = (article.get("title") or "").strip()
+        summary = (article.get("summary") or "").strip()
+        if not title or len(summary) < 100:
+            continue
+        if any(title.lower() in r.lower() or r.lower() in title.lower() for r in recent):
+            continue
+
+        keywords = _news_image_keywords(title)
+        if not keywords:
+            continue
+
+        assets = []
+        seen_paths = set()
+
+        def _collect(new_assets):
+            for a in new_assets:
+                if a.local_path not in seen_paths:
+                    assets.append(a)
+                    seen_paths.add(a.local_path)
+
+        for kw in keywords:
+            if len(assets) >= 4:
+                break
+            try:
+                _collect(visual_source.fetch_nasa_images_for_topic(kw, count=4 - len(assets)))
+            except Exception:
+                pass
+        for kw in keywords:
+            if len(assets) >= 4:
+                break
+            try:
+                _collect(visual_source.fetch_esa_hubble_images_for_topic(kw, count=4 - len(assets)))
+            except Exception:
+                pass
+        if len(assets) < 2:
+            continue
+
+        return title, keywords[0], summary, assets
+
+    return None
+
+
 def _choose_fallback_topic(channel: sqlite3.Row) -> tuple[str, str]:
     """Escolhe um tema da lista rotativa do canal evitando repetir os últimos
     usados - sem isso, rodando 1x/dia por meses, a lista de 10 temas padrão
@@ -589,10 +680,18 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
             # mesmo trocando de assunto todo dia (ver roadmap de conteúdo).
             series = channel["series_primary"]
         else:
-            topic, image_query = _choose_fallback_topic(channel)
-            facts = f"(sem explicação factual da APOD hoje - roteirista deve pesquisar sobre {topic} antes de gravar)"
-            assets = []
-            series = channel["series_fallback"]
+            news_result = _choose_news_topic(channel)
+            if news_result:
+                topic, image_query, facts, assets = news_result
+                # Notícia real recente com fonte checável e imagem de verdade
+                # encontrada - mesmo status de "conteúdo com fonte factual"
+                # que a APOD, não o fallback fraco sem fonte.
+                series = channel["series_primary"]
+            else:
+                topic, image_query = _choose_fallback_topic(channel)
+                facts = f"(sem explicação factual da APOD hoje - roteirista deve pesquisar sobre {topic} antes de gravar)"
+                assets = []
+                series = channel["series_fallback"]
 
     angle = random.choice(PROMPT_ANGLES)
     niche = channel["niche"] or "ciência"

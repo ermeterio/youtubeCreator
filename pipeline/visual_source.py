@@ -29,6 +29,7 @@ import config
 NASA_IMAGES_SEARCH_URL = "https://images-api.nasa.gov/search"
 NASA_APOD_URL = "https://api.nasa.gov/planetary/apod"
 ESA_HUBBLE_SEARCH_URL = "https://esahubble.org/images/json/"
+SPACEFLIGHT_NEWS_URL = "https://api.spaceflightnewsapi.net/v4/articles/"
 
 _RETRY_BACKOFF_SECONDS = (2, 8, 20)
 
@@ -122,6 +123,20 @@ def fetch_esa_hubble_images_for_topic(query: str, count: int = 6) -> list[Visual
         title = _clean_esa_string(item.get("Title") or query)
         assets.append(VisualAsset(local_path=dest, credit=credit, title=title))
     return assets
+
+
+def fetch_recent_space_news(limit: int = 10) -> list[dict]:
+    """Notícias reais e recentes de espaço/astronomia (Spaceflight News API -
+    api.spaceflightnewsapi.net, pública, sem chave, agrega fontes como
+    NASA/ESA/SpaceX). Usada como fallback de conteúdo quando a APOD do dia
+    não rende um bom tema: cobre lançamentos, descobertas e missões reais e
+    atuais, em vez de cair direto pro tema genérico fixo da rotação."""
+    response = _get_with_retry(
+        SPACEFLIGHT_NEWS_URL,
+        params={"limit": limit, "ordering": "-published_at"},
+        timeout=20,
+    )
+    return response.json().get("results", [])
 
 
 def fetch_apod(api_key: str | None = None) -> dict:
