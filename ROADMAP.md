@@ -12,6 +12,12 @@ de outras plataformas (TikTok/Reels) estão fora de escopo por ora.
   volume sem supervisão editorial clara — reforça prioridade para Shorts cortados do longo em vez de
   gerados em paralelo sem relação editorial com ele.
 
+## Nota operacional (25/09/2026)
+Reiniciar o servidor (`pipeline.settings_ui`) enquanto a fila de geração está processando um item
+pode deixar esse item preso em `running` pra sempre (a thread que o processava morre junto com o
+processo). O worker agora se auto-recupera disso no próximo start (`queue_worker._recover_stale_running_items`),
+mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
+
 ## Agora / próximo trimestre
 - [x] **Divulgação de IA correta** (`containsSyntheticMedia`) — DONE (25/09/2026)
 - [x] **Correção de relevância de imagens** (fallback tópico-aware, remoção de "spacecraft" genérico do
@@ -20,11 +26,10 @@ de outras plataformas (TikTok/Reels) estão fora de escopo por ora.
 - [x] **Fallback de conteúdo via notícias reais** (Spaceflight News API, com validação de imagem antes de usar) — DONE (25/09/2026)
 - [x] **Shorts cortados automaticamente do vídeo longo** (mesmo Ken Burns/narração até o ponto de
       corte, corte alinhado à troca de imagem mais próxima, não meio de crossfade) — DONE (25/09/2026)
-- [ ] **A/B testing de título/thumbnail** — DEFERIDO por incerteza real: não confirmei se a YouTube
-      Analytics API v2 expõe impressões/CTR verdadeiros (métrica que sustentaria a comparação) pra
-      apps de terceiros, só retenção/views/likes. Implementar às cegas arriscava um recurso que
-      parece funcionar mas mede a coisa errada. Precisa de uma sessão dedicada de verificação contra
-      a documentação oficial antes de codar. Esforço: M. Sem API paga (se a métrica existir).
+- [x] **A/B testing de thumbnail** — DONE (25/09/2026): confirmado que `videoThumbnailImpressions`/
+      `videoThumbnailImpressionsClickRate` (CTR real) estão na Analytics API desde jan/2026. Todo vídeo
+      novo gera 2 variantes de thumbnail; alguns dias após publicar, troca pra B, compara CTR real do
+      período antes/depois, e mantém a que ganhar - tudo automático, logado, sem API paga.
 
 ## Concorrência e ideias disruptivas (pesquisa de 25/09/2026, ver histórico do commit)
 - [x] **Comentários reais como fonte de pauta** (YouTube Data API → resumo de perguntas recorrentes →
@@ -34,10 +39,11 @@ de outras plataformas (TikTok/Reels) estão fora de escopo por ora.
 - [x] **Corte alinhado à cena** (Short não corta mais no meio de uma transição de imagem) — DONE (25/09/2026)
 - [x] **Aprendizado por motivo de rejeição estruturado** — DONE (25/09/2026): tags rápidas de um clique
       (imagem não bate, gancho fraco, redundante, genérico demais) pré-preenchem o campo de observação.
-- [ ] **Matching de imagem por embeddings semânticos locais** (sentence-transformers, roteiro→imagem por
-      similaridade em vez de keyword) — DEFERIDO: exige instalar uma dependência de ML pesada nova no
-      ambiente local, decisão que merece confirmação explícita antes de baixar/instalar algo grande
-      sem supervisão. Esforço: M, 100% local se aprovado.
+- [ ] **Matching de imagem por embeddings semânticos locais** — pesquisa (25/09/2026) achou uma opção
+      bem mais leve que sentence-transformers: `fastembed` (ONNX, sem PyTorch), modelo ~67-90MB, dezenas
+      de MB de dependência (não ~2GB+). Ainda DEFERIDO só porque é uma dependência nova que baixa um
+      modelo pela rede na primeira execução - pedir confirmação explícita antes de instalar, não é uma
+      decisão de código pura. Esforço: M, 100% local depois de aprovado.
 - [ ] **Inverter ordem: confirmar imagem disponível antes de narrar aquele trecho** — DEFERIDO
       deliberadamente: é uma mudança arquitetural grande (reescreve a ordem roteiro→imagem→narração)
       com risco real de quebrar o pipeline inteiro se malfeita sem revisão de design humana. Candidato
