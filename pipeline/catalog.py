@@ -79,6 +79,7 @@ _MIGRATION_COLUMNS = {
         "feedback_notes": "TEXT",
         "feedback_action": "TEXT",
         "clarity_review": "TEXT",
+        "fact_check_details": "TEXT",
     },
     "channels": {
         "series_primary": "TEXT NOT NULL DEFAULT 'Direto da Fonte'",

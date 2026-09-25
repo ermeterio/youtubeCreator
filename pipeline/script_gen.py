@@ -568,7 +568,7 @@ def _generate_with_llm(topic: str, facts: str, angle: str, niche: str, feedback_
     return _parse_llm_output(text) if text else None
 
 
-def _fact_check(script: str, facts: str) -> str:
+def _fact_check(script: str, facts: str) -> tuple[str, str | None]:
     """Segunda passada do LLM conferindo se as afirmações do roteiro batem
     com os fatos-fonte. Não bloqueia o pipeline (o gate de revisão humana já
     existe pra isso) - só marca o track pra o dono saber que aquele vídeo
@@ -580,15 +580,21 @@ def _fact_check(script: str, facts: str) -> str:
     só sem o selo extra de confiança).
     """
     if not facts or facts.startswith("(sem explicação factual") or facts.startswith("(tema pedido manualmente"):
-        return "sem_fonte"
+        return "sem_fonte", None
 
     prompt = FACT_CHECK_TEMPLATE.format(facts=facts, script=script)
     text = _call_ollama(prompt, timeout=120)
     if not text or not _has_marker(text, "RESULTADO:"):
-        return "indisponivel"
+        return "indisponivel", None
 
-    result_line = _split_at_marker(text, "RESULTADO:")[1].split("\n", 1)[0].strip().upper()
-    return "ok" if result_line.startswith("OK") else "atencao"
+    after_result = _split_at_marker(text, "RESULTADO:")[1]
+    result_line = after_result.split("\n", 1)[0].strip().upper()
+    flag = "ok" if result_line.startswith("OK") else "atencao"
+
+    details = None
+    if _has_marker(after_result, "DETALHES:"):
+        details = _split_at_marker(after_result, "DETALHES:")[1].strip()
+    return flag, details
 
 
 _NEWS_IMAGE_VOCAB = {
@@ -760,14 +766,14 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
             "roteiro (fatos em inglês, sem reescrita). Confira se `ollama serve` está rodando."
         )
         generated = _fallback_script(topic, facts, language_code)
-        fact_check = "indisponivel"
+        fact_check, fact_check_details = "indisponivel", None
     else:
         feedback_section = _feedback_section(channel["id"])
         generated = (
             _generate_with_llm(topic, facts, angle, niche, feedback_section, language["llm_language_name"])
             or _fallback_script(topic, facts, language_code)
         )
-        fact_check = _fact_check(generated["script"], facts)
+        fact_check, fact_check_details = _fact_check(generated["script"], facts)
 
     # Um vídeo longo com uma imagem só fica monótono. Busca por várias
     # imagens relacionadas ao tema real (NASA + ESA/Hubble). Prioriza as
@@ -843,5 +849,6 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         "topic": topic,
         "visual_assets": assets,
         "fact_check": fact_check,
+        "fact_check_details": fact_check_details,
         "series": series,
     }

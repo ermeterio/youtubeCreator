@@ -1391,9 +1391,11 @@ def video_detail(track_id: int):
 
     fact_check_note = ""
     if track["fact_check_flag"] == "atencao":
+        details = track["fact_check_details"] if "fact_check_details" in track.keys() else None
+        details_html = f"<br><span style='font-size:0.85rem;'>{details}</span>" if details else ""
         fact_check_note = (
             '<div class="flash">O fact-check automático encontrou afirmação(ões) no roteiro sem '
-            "correspondência clara nos fatos-fonte. Confira o roteiro com atenção antes de aprovar.</div>"
+            f"correspondência clara nos fatos-fonte. Confira o roteiro com atenção antes de aprovar.{details_html}</div>"
         )
 
     clarity_note = ""
@@ -1491,7 +1493,13 @@ def video_detail(track_id: int):
       <button type="submit" name="feedback" value="liked">👍 Gostei</button>
       <button type="submit" name="feedback" value="disliked" class="secondary">👎 Não gostei</button>
       <label>Observação (o que funcionou bem, ou o que evitar da próxima vez)</label>
-      <textarea name="notes" rows="3" placeholder="ex.: as imagens depois da primeira não batem com o assunto do vídeo">{track['feedback_notes'] or ''}</textarea>
+      <p class="muted" style="font-size:0.8rem;">Motivos rápidos (clique pra preencher, depois ajuste o texto):
+        <a href="#" onclick="document.getElementById('fb-notes').value='Imagens não batem com o assunto narrado.'; return false;">imagem não bate</a> ·
+        <a href="#" onclick="document.getElementById('fb-notes').value='Gancho inicial fraco, não prende atenção.'; return false;">gancho fraco</a> ·
+        <a href="#" onclick="document.getElementById('fb-notes').value='Tom didático demais / redundante.'; return false;">redundante</a> ·
+        <a href="#" onclick="document.getElementById('fb-notes').value='Título/roteiro genérico demais.'; return false;">genérico demais</a>
+      </p>
+      <textarea id="fb-notes" name="notes" rows="3" placeholder="ex.: as imagens depois da primeira não batem com o assunto do vídeo">{track['feedback_notes'] or ''}</textarea>
       <button type="submit" formaction="{url_for('consult_feedback_route', track_id=track_id)}" class="secondary">
         💬 Enviar observação e pedir análise ao Llama
       </button>

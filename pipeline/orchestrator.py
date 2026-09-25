@@ -110,6 +110,7 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         result = script_gen.build_daily_script(channel, forced_topic=forced_topic)
         script, topic, assets = result["script"], result["topic"], result["visual_assets"]
         fact_check, series = result["fact_check"], result["series"]
+        fact_check_details = result.get("fact_check_details")
         title = f"{series} | {result['title']}"
 
         if not assets:
@@ -120,7 +121,7 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
 
         credits = [asset.credit for asset in assets]
         track_id = catalog.create_track(title, topic, script, ", ".join(credits), channel_id=channel["id"])
-        catalog.update_track(track_id, fact_check_flag=fact_check, series=series)
+        catalog.update_track(track_id, fact_check_flag=fact_check, fact_check_details=fact_check_details, series=series)
 
         # Segunda passada do LLM simulando um espectador leigo - sinaliza
         # trechos confusos/redundantes ANTES da revisão humana, sem travar o
