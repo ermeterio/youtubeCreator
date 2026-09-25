@@ -21,7 +21,7 @@ import requests
 from PIL import Image
 
 import config
-from pipeline import catalog, channels, notify, visual_source
+from pipeline import catalog, channels, notify, visual_source, youtube_analytics
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
@@ -269,8 +269,9 @@ def _feedback_section(channel_id: int, limit: int = 3) -> str:
     exemplos reais do que agradou e notas do que evitar."""
     liked = catalog.feedback_examples(channel_id, "liked", limit)
     disliked = catalog.feedback_examples(channel_id, "disliked", limit)
+    seo_block = _seo_performance_section(channel_id)
     if not liked and not disliked:
-        return ""
+        return seo_block
 
     liked_block = ""
     if liked:
@@ -288,7 +289,60 @@ def _feedback_section(channel_id: int, limit: int = 3) -> str:
         joined_notes = "\n".join(f"- {n}" for n in notes)
         disliked_block = f"\nO dono REJEITOU roteiros anteriores pelos seguintes motivos - EVITE repetir isso:\n{joined_notes}\n"
 
-    return FEEDBACK_SECTION_TEMPLATE.format(liked_block=liked_block, disliked_block=disliked_block)
+    return FEEDBACK_SECTION_TEMPLATE.format(liked_block=liked_block, disliked_block=disliked_block) + seo_block
+
+
+def _seo_performance_section(channel_id: int, limit: int = 3, min_sample: int = 5) -> str:
+    """Fecha o loop entre desempenho real no YouTube (retenção medida via
+    Analytics) e a geração de título/gancho - sem isso, o canal repete os
+    mesmos padrões de título pra sempre, mesmo que uns performem muito melhor
+    que outros. Só entra em ação depois que o canal já tem `min_sample`
+    vídeos com métrica real (amostra pequena demais vira ruído, não sinal).
+    Falha silenciosa (retorna "") se o canal ainda não está autorizado, sem
+    conexão, ou a API não responder - isso é só um reforço opcional do
+    prompt, nunca pode travar a geração do vídeo do dia."""
+    try:
+        channel = channels.get_channel(channel_id)
+        secret_path = channels.client_secret_path(channel["slug"])
+        token_path = channels.token_path(channel["slug"])
+        if not token_path.exists():
+            return ""
+
+        per_video = youtube_analytics.video_metrics(secret_path, token_path, days=90, max_results=50)
+        if len(per_video) < min_sample:
+            return ""
+
+        local_by_youtube_id = {
+            t["youtube_video_id"]: t["title"]
+            for t in catalog.list_tracks(channel_id=channel_id, limit=200)
+            if t["youtube_video_id"]
+        }
+
+        scored = []
+        for video_id, metrics in per_video.items():
+            title = local_by_youtube_id.get(video_id)
+            pct = metrics.get("averageViewPercentage")
+            if title and pct is not None:
+                scored.append((title, float(pct)))
+        if len(scored) < min_sample:
+            return ""
+
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        best = scored[:limit]
+        worst = scored[-limit:] if len(scored) > limit else []
+
+        best_block = "\n".join(f'- "{t}" ({pct:.0f}% de retenção média)' for t, pct in best)
+        section = (
+            f"\nDesempenho real medido no YouTube (retenção média dos últimos vídeos) - use "
+            f"como sinal de que TIPO de título/gancho prende mais atenção:\n"
+            f"Títulos com MELHOR retenção (título/abertura nesse estilo tendem a funcionar):\n{best_block}\n"
+        )
+        if worst:
+            worst_block = "\n".join(f'- "{t}" ({pct:.0f}% de retenção média)' for t, pct in worst)
+            section += f"Títulos com retenção mais BAIXA (evite repetir esse padrão de título/abertura):\n{worst_block}\n"
+        return section
+    except Exception:
+        return ""
 
 
 def consult_feedback(title: str, script: str, observation: str, niche: str = "ciência") -> dict:
@@ -592,9 +646,24 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
 
     # Termos genéricos de astronomia são o ÚLTIMO recurso - só entram se as
     # palavras-chave específicas do tema não trouxerem imagens suficientes.
+    # Isso já causou um problema real (relatado pelo dono): busca específica
+    # falhou, caiu pro pool genérico embaralhado, e um termo genérico batido
+    # ao acaso trouxe imagem sem nenhuma relação com o que estava sendo
+    # narrado. Mitigação: prioriza, dentro do pool genérico, os termos que
+    # têm palavras em comum com o tema/keywords reais antes de sortear o
+    # resto - reduz a chance de pegar um termo genérico completamente
+    # desconectado do assunto do vídeo.
     if len(assets) < target_count:
+        notify.log(
+            f"[imagens] Busca específica não trouxe {target_count} imagens pra \"{topic}\" "
+            f"(queries: {search_queries}) - caindo pro pool genérico."
+        )
+        topic_words = {w.lower() for q in search_queries for w in re.findall(r"[a-zA-Zà-úÀ-Ú]+", q)}
         generic_pool = list(config.GENERIC_IMAGE_QUERIES)
         random.shuffle(generic_pool)
+        generic_pool.sort(
+            key=lambda term: not (topic_words & {w.lower() for w in term.split()}),
+        )
         for query in generic_pool:
             if len(assets) >= target_count:
                 break

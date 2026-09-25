@@ -17,10 +17,10 @@ Antes de usar (por canal):
    production" (não "Testing") - em "Testing" o refresh token expira em 7
    dias e o upload automático para de funcionar sem aviso.
 
-O campo de disclosure de "conteúdo sintético/alterado" (containsSyntheticMedia)
-deve ser confirmado contra a versão mais recente da documentação oficial da
-API antes de ir para produção - o nome/local exato do campo pode ter mudado
-desde a pesquisa que embasou este projeto.
+Todo upload feito por este pipeline declara `status.containsSyntheticMedia = true`
+(campo oficial da API desde out/2024) - roteiro e narração são gerados por IA,
+então o disclosure de conteúdo A/S (alterado/sintético) é aplicado por padrão
+em todo vídeo publicado, conforme a política de rotulagem do YouTube.
 """
 
 from pathlib import Path
@@ -98,9 +98,9 @@ def upload_video(video_path: Path, title: str, description: str,
             "privacyStatus": privacy_status,
             "selfDeclaredMadeForKids": False,
             # Disclosure de conteúdo alterado/sintético (narração e roteiro
-            # gerados por IA) - ver nota no topo do arquivo sobre confirmar o
-            # nome exato do campo contra a documentação mais recente da API.
-            "selfCertifiedAsAltered": contains_synthetic_media,
+            # gerados por IA) - campo oficial da API desde out/2024, exigido
+            # pela política de rotulagem de conteúdo A/S do YouTube.
+            "containsSyntheticMedia": contains_synthetic_media,
         },
     }
 

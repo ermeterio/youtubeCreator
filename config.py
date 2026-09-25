@@ -66,9 +66,14 @@ DEFAULT_FONT = FONT_TITLE
 # só para o vídeo não ficar com imagem repetida quando a busca específica
 # falha.
 GENERIC_IMAGE_QUERIES = [
-    "galaxy", "nebula", "black hole", "solar system", "spacecraft",
-    "stars", "hubble telescope", "james webb telescope",
+    "galaxy", "nebula", "black hole", "solar system",
+    "stars", "hubble telescope", "james webb telescope", "supernova", "star cluster",
 ]
+# "spacecraft" foi removido de propósito: a busca da NASA devolve fotos de
+# engenharia/sala limpa (sonda sendo montada no chão) pra esse termo, não
+# imagens de espaço - destoa completamente de roteiros sobre nebulosas,
+# estrelas etc. e foi a causa raiz de um relato real de imagem sem relação
+# nenhuma com a narração.
 
 # Vozes disponíveis no edge-tts (`edge-tts --list-voices` pra ver todas).
 # ThalitaMultilingualNeural/AvaMultilingualNeural usam o modelo multilíngue
