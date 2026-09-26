@@ -87,6 +87,21 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       link, frases-gatilho, excesso de emoji, mistura de alfabetos (homóglifos), mensagem duplicada do
       mesmo autor em vídeos diferentes. Comentários com score ≥40 aparecem primeiro na tela, com botão
       "Ocultar (spam)" (`comments.setModerationStatus`) - sempre um clique explícito, nunca automático.
+- [x] **Robustez de token OAuth** — DONE (26/09/2026). Pesquisa de mercado (rodada 3) apontou
+      expiração silenciosa de token como a falha mais citada em automações solo do YouTube em 2026.
+      Achado real no código: quando o refresh do token falhava (revogado, ou app em modo "Testing"),
+      o pipeline caía silenciosamente pro fluxo interativo de login por navegador - que TRAVA pra
+      sempre num contexto sem tela (worker da fila, tarefa agendada às 3h). Corrigido: falha de
+      refresh agora levanta erro claro e imediato ("reautorize esse canal") em vez de travar. Health
+      check diário também ganhou alerta destacado (toast) específico pra esse caso. Testado com um
+      token forjado (refresh_token inválido) - confirma erro claro em vez de travamento.
+- [ ] **Feedback de retenção com corte de 70% em Shorts** — pesquisa (rodada 3) achou que a
+      distribuição de Shorts depende de bater ~70% de retenção nos primeiros 30-60min. Estender o
+      few-shot já existente pra marcar vídeos abaixo desse corte como exemplo negativo explícito
+      ("hook fraco"), usando dados já coletados da Analytics API. Esforço: S. Sem API nova.
+- [ ] **Aviso de janela crítica de publicação** — sugerir automaticamente o horário de publicação com
+      maior chance de engajamento nos primeiros 30-60min, usando dados históricos já acessíveis via
+      Analytics API por canal. Puramente informativo. Esforço: S/M.
 - [ ] **Upgrade opcional de LLM/TTS em nuvem** — prioridade baixa, contraria design local-first/grátis;
       só faz sentido se qualidade virar gargalo real. Esforço: S/M. **Requer API paga.**
 - ~~Repurposing multi-plataforma (TikTok/Reels)~~ — fora de escopo por decisão explícita do dono.

@@ -55,7 +55,23 @@ def _get_credentials(client_secret_path: Path, token_path: Path, force_new: bool
 
     if force_new or not creds or not creds.valid:
         if not force_new and creds and creds.expired and creds.refresh_token:
-            creds.refresh(google.auth.transport.requests.Request())
+            # Se o refresh falhar (token revogado, ou app OAuth em modo
+            # "Testing" com refresh token de 7 dias), NÃO pode cair pro fluxo
+            # interativo abaixo - isso trava pra sempre esperando login num
+            # navegador que nunca vai abrir quando chamado de um contexto sem
+            # tela (worker da fila, tarefa agendada às 3h). Falha silenciosa
+            # de token é hoje o ponto de falha mais citado em automações
+            # solo do YouTube (ver ROADMAP.md) - erro claro na hora é melhor
+            # que travar sem explicação.
+            try:
+                creds.refresh(google.auth.transport.requests.Request())
+            except Exception as exc:
+                raise RuntimeError(
+                    f"O token salvo para este canal expirou e não foi possível renová-lo "
+                    f"automaticamente (provavelmente revogado, ou o app OAuth está em modo "
+                    f"'Testing' no Google Cloud Console - refresh token dura só 7 dias nesse modo, "
+                    f"mude pra 'In production'). Reautorize esse canal pela interface. Erro original: {exc}"
+                ) from exc
         else:
             if not client_secret_path.exists():
                 raise RuntimeError(

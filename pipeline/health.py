@@ -36,9 +36,18 @@ def check_channels_health() -> list[str]:
         try:
             info = youtube_upload.get_channel_info(secret_path, token_path)
         except Exception as exc:
-            msg = f"[{channel['name']}] Canal inacessível pela API do YouTube: {exc}"
+            if "expirou" in str(exc) and "reautorize" in str(exc).lower():
+                # Falha de token é o ponto de falha mais citado em automações
+                # solo do YouTube (ver ROADMAP.md) - alerta destacado (toast,
+                # não só log em arquivo que ninguém vai ler até dar problema
+                # de verdade), porque toda geração futura desse canal vai
+                # falhar até reautorizar.
+                msg = f"[{channel['name']}] Token expirado - reautorize esse canal antes da próxima geração."
+                notify.notify_result(False, msg)
+            else:
+                msg = f"[{channel['name']}] Canal inacessível pela API do YouTube: {exc}"
+                notify.log(msg)
             warnings.append(msg)
-            notify.log(msg)
             continue
 
         if not info:
