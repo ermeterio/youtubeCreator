@@ -850,6 +850,19 @@ def channel_studio(channel_id: int):
 
     status = _generation_status.get(channel_id, "")
 
+    best_day_note = ""
+    try:
+        from pipeline import reports
+        best_day = reports.best_publish_weekday(channel_id)
+        if best_day:
+            best_day_note = (
+                f'<div class="panel accent"><p class="muted">📅 Baseado no histórico real deste canal, '
+                f'<b>{best_day}</b> costuma render mais views - considere publicar os aprovados nesse '
+                f"dia (informativo, não é regra).</p></div>"
+            )
+    except Exception:
+        pass
+
     language = channels.language_for(ch)
     current_voice = channels.narration_voice_for(ch)
     voice_options_html = "".join(
@@ -881,6 +894,7 @@ def channel_studio(channel_id: int):
     imagens, narração, dois vídeos montados); itens na fila são processados 1 de cada vez, em segundo
     plano. Tudo cai em "Vídeos gerados" com status "aguardando revisão" - nada é publicado sozinho.</p>
 
+    {best_day_note}
     {voice_panel}
 
     <div class="panel accent">

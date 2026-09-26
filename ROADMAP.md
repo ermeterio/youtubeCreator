@@ -99,9 +99,13 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       agora distingue Shorts de vídeos longos (via `youtube_short_video_id`) e sinaliza explicitamente
       Shorts abaixo de 70% de retenção como exemplo negativo pro próximo roteiro, com a explicação de
       *por que* isso importa (corte de distribuição), não só "retenção baixa" genérico.
-- [ ] **Aviso de janela crítica de publicação** — sugerir automaticamente o horário de publicação com
-      maior chance de engajamento nos primeiros 30-60min, usando dados históricos já acessíveis via
-      Analytics API por canal. Puramente informativo. Esforço: S/M.
+- [x] **Aviso de dia de publicação** — DONE (26/09/2026), versão honesta do item original: a Analytics
+      API padrão não dá granularidade de HORÁRIO de forma simples/confiável, então implementei o que
+      dá pra sustentar com dado real - `reports.best_publish_weekday()` cruza views reais por vídeo já
+      publicado com o dia da semana de publicação (usa a coluna `published_at`, adicionada nesta mesma
+      sessão) e mostra um aviso informativo no Estúdio ("dia X costuma render mais views"). Exige
+      amostra mínima de 6 vídeos publicados; retorna None (sem aviso) antes disso - testado e confirma
+      esse comportamento no canal ainda novo.
 - [ ] **Upgrade opcional de LLM/TTS em nuvem** — prioridade baixa, contraria design local-first/grátis;
       só faz sentido se qualidade virar gargalo real. Esforço: S/M. **Requer API paga.**
 - ~~Repurposing multi-plataforma (TikTok/Reels)~~ — fora de escopo por decisão explícita do dono.
