@@ -65,6 +65,12 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       recentes silenciosamente. Corrigido: usa a API de backup online do próprio `sqlite3`
       (`Connection.backup()`), que lida com WAL corretamente. Testado: escreveu um dado novo, confirmou
       que o backup gerado logo em seguida já contém esse dado.
+- [x] **Varredura completa do mesmo padrão de escrita não-atômica** — `pipeline/atomic_io.py` (helper
+      compartilhado) aplicado também em: `checkpoint.json` (usado pela própria lógica de retomada -
+      corrompido, travaria a retomada pra sempre até intervenção manual), cache de imagem baixada da
+      NASA/ESA (`visual_source._download` - truncada, ficaria "cacheada" como válida e quebraria toda
+      vez que o PIL tentasse abrir depois), token OAuth e `client_secret.json`. Testado: roundtrip de
+      checkpoint e download real de imagem, sem arquivo `.partial` deixado pra trás.
 
 ## Agora / próximo trimestre
 

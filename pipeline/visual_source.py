@@ -25,6 +25,7 @@ from pathlib import Path
 import requests
 
 import config
+from pipeline.atomic_io import atomic_write_bytes
 
 NASA_IMAGES_SEARCH_URL = "https://images-api.nasa.gov/search"
 NASA_APOD_URL = "https://api.nasa.gov/planetary/apod"
@@ -69,9 +70,13 @@ def search_nasa_images(query: str, media_type: str = "image", limit: int = 8) ->
 
 
 def _download(url: str, dest: Path) -> Path:
-    dest.parent.mkdir(parents=True, exist_ok=True)
     response = _get_with_retry(url, timeout=60)
-    dest.write_bytes(response.content)
+    # Escrita atômica - o cache dessa imagem é considerado "pronto" só por
+    # `dest.exists()` (ver fetch_nasa_images_for_topic/fetch_esa_hubble_
+    # images_for_topic); um arquivo truncado por interrupção no meio da
+    # escrita ficaria "cacheado" como válido pra sempre, e quebraria toda vez
+    # que o PIL tentasse abrir essa imagem depois.
+    atomic_write_bytes(dest, response.content)
     return dest
 
 

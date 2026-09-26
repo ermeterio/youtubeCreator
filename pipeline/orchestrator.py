@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import config
-from pipeline import audio_post, backup, catalog, channels, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
+from pipeline import atomic_io, audio_post, backup, catalog, channels, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
 
 # Status em que o track já passou por roteiro+imagens+narração (a parte cara:
 # chamadas ao Ollama, busca de imagem, TTS) mas ainda não terminou a
@@ -39,7 +39,7 @@ def _save_checkpoint(work_dir: Path, assets: list, boundaries: list[dict]) -> No
         "assets": [{"local_path": str(a.local_path), "credit": a.credit, "title": a.title} for a in assets],
         "boundaries": boundaries,
     }
-    _checkpoint_path(work_dir).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    atomic_io.atomic_write_text(_checkpoint_path(work_dir), json.dumps(data, ensure_ascii=False))
 
 
 def _load_checkpoint(work_dir: Path) -> dict | None:

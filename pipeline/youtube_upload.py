@@ -34,6 +34,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 import config
+from pipeline import atomic_io
 
 # Códigos de erro tratados como transitórios pelo próprio guia da Google pra
 # upload resumable (5xx de servidor + 429 de rate limit) - vale tentar de
@@ -98,8 +99,7 @@ def _get_credentials(client_secret_path: Path, token_path: Path, force_new: bool
             extra_kwargs = {"prompt": "select_account consent"} if force_new else {}
             creds = flow.run_local_server(port=0, **extra_kwargs)
 
-        token_path.parent.mkdir(parents=True, exist_ok=True)
-        token_path.write_text(creds.to_json())
+        atomic_io.atomic_write_text(token_path, creds.to_json())
 
     return creds
 

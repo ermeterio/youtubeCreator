@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, abort, redirect, render_template_string, request, send_file, url_for
 
 import config
-from pipeline import catalog, channels, notify, orchestrator, reports, spam_detection, youtube_analytics, youtube_upload
+from pipeline import atomic_io, catalog, channels, notify, orchestrator, reports, spam_detection, youtube_analytics, youtube_upload
 
 app = Flask(__name__)
 
@@ -609,7 +609,7 @@ def save_client_secret(channel_id: int):
         )
         return redirect(url_for("edit_channel", channel_id=channel_id))
 
-    channels.client_secret_path(ch["slug"]).write_text(raw, encoding="utf-8")
+    atomic_io.atomic_write_text(channels.client_secret_path(ch["slug"]), raw)
     _flash("Credenciais salvas. Agora clique em 'Autorizar no YouTube'.")
     return redirect(url_for("edit_channel", channel_id=channel_id))
 
