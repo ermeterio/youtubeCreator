@@ -16,9 +16,16 @@ _lock = threading.Lock()
 
 
 def _process_one(item) -> None:
-    channel = channels.get_channel(item["channel_id"])
-    catalog.update_queue_item(item["id"], status="running", started_at=_now())
+    """Todo o corpo fica dentro do try, de propósito - inclusive
+    channels.get_channel() e o update_queue_item("running") inicial. Um item
+    de fila apontando pra um canal que foi excluído nesse meio-tempo (já
+    aconteceu de verdade) faria get_channel() levantar ValueError ANTES do
+    try antigo começar, o que subia pra _loop() e matava a thread do worker
+    pra sempre, em silêncio (thread daemon que morre não avisa ninguém) -
+    nenhum item da fila seria processado de novo até reiniciar o servidor."""
     try:
+        channel = channels.get_channel(item["channel_id"])
+        catalog.update_queue_item(item["id"], status="running", started_at=_now())
         track_id = orchestrator.prepare_daily_video(
             item["channel_id"], forced_topic=(item["topic_label"], item["topic_query"])
         )
@@ -26,7 +33,7 @@ def _process_one(item) -> None:
         notify.log(f"[{channel['name']}] Fila: vídeo sobre \"{item['topic_label']}\" pronto (track {track_id}).")
     except Exception as exc:
         catalog.update_queue_item(item["id"], status="failed", error=str(exc), finished_at=_now())
-        notify.log(f"[{channel['name']}] Fila: falhou ao gerar \"{item['topic_label']}\": {exc}")
+        notify.log(f"Fila: falhou ao gerar \"{item['topic_label']}\" (canal id {item['channel_id']}): {exc}")
 
 
 def _now() -> str:
@@ -36,10 +43,18 @@ def _now() -> str:
 
 def _loop() -> None:
     while True:
-        item = catalog.next_pending_queue_item()
-        if item:
-            _process_one(item)
-        else:
+        try:
+            item = catalog.next_pending_queue_item()
+            if item:
+                _process_one(item)
+            else:
+                time.sleep(5)
+        except Exception as exc:
+            # Segunda camada de defesa: _process_one já trata os erros
+            # esperados, mas se algo mesmo assim escapar (bug novo, erro de
+            # banco), loga e continua em vez de matar a thread do worker em
+            # silêncio pro resto da vida do processo.
+            notify.log(f"Fila: erro inesperado no loop do worker (não devia acontecer): {exc}")
             time.sleep(5)
 
 
