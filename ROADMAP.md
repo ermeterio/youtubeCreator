@@ -51,6 +51,13 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       spacecraft" contra um roteiro de nebulosa - as 6 imagens (todas "Dawn Spacecraft Processing")
       foram corretamente rejeitadas pelo filtro. Falha aberta (não bloqueia geração) se o modelo não
       carregar por qualquer motivo.
+      **Validado em produção (26/09/2026, track 23):** geração real via fallback de notícia (Starliner/
+      Boeing) escolheu imagens genuinamente relacionadas ("Boeing's Starliner CST-100", "International
+      Space Station Update") - sem nenhuma imagem de "spacecraft processing" ou afins.
+- [x] **Score de qualidade agregado** — DONE (26/09/2026): cruza fact-check + revisão de clareza +
+      relevância média de imagem num badge único (0-100) visível no grid, modal e página do vídeo.
+      Track 23 (validação) tirou 70/100 - detalhamento: fatos 35/35 (ok), clareza 15/35 (revisão
+      apontou trecho redundante), imagens 20/30 (relevância média 0.67).
 - [ ] **Inverter ordem: confirmar imagem disponível antes de narrar aquele trecho** — DEFERIDO
       deliberadamente: é uma mudança arquitetural grande (reescreve a ordem roteiro→imagem→narração)
       com risco real de quebrar o pipeline inteiro se malfeita sem revisão de design humana. Candidato
