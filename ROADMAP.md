@@ -68,8 +68,11 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       (`_build_description`) desde antes; confirmado, nenhuma ação necessária.
 
 ## Próximos 2-3 trimestres
-- [~] **Framework de fontes de conteúdo plugável** (APOD → notícia → rotação fixa, hoje é cascata
-      hardcoded) — PARCIAL, falta abstrair como estratégias intercambiáveis. Esforço: M.
+- [x] **Framework de fontes de conteúdo plugável** — DONE (26/09/2026). APOD/notícia/rotação viraram
+      funções no formato `(channel, api_key) -> dict | None` numa lista `CONTENT_SOURCES` (`script_gen.
+      py`) - adicionar uma fonte nova (ex.: RSS de outro nicho) é só escrever a função e colocar na
+      lista, sem tocar na cascata. Testado ponta a ponta sem regressão (mesmo comportamento de antes,
+      fonte de notícia escolhida corretamente, série/fact-check consistentes).
 - [x] **Gestão de comentários (moderação + resposta sugerida)** — DONE (26/09/2026). Pesquisa de
       mercado confirmou spam de bot (com substituição de caracteres Unicode pra escapar de filtro) é
       dor real e crescente em 2026. Heurística local (`pipeline/spam_detection.py`, sem LLM/API paga):

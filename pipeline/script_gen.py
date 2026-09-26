@@ -732,6 +732,54 @@ def _choose_fallback_topic(channel: sqlite3.Row) -> tuple[str, str]:
     return random.choice(available or topics)
 
 
+# Framework de fontes de conteúdo plugável - cada fonte é uma função
+# (channel, api_key) -> dict | None. None significa "essa fonte não rendeu
+# conteúdo hoje, tenta a próxima"; um dict de resultado precisa ter as
+# chaves topic/image_query/facts/assets/has_source (has_source=True usa a
+# série "primária" do canal, por ter uma fonte factual real e checável -
+# ver build_daily_script). Adicionar uma fonte nova (ex.: um feed RSS de
+# outro nicho) é só escrever a função no mesmo formato e colocar na lista
+# CONTENT_SOURCES, na ordem de prioridade desejada - nenhuma outra parte do
+# pipeline precisa mudar. _source_rotation é o fallback garantido (nunca
+# retorna None), por isso fica fora da lista, chamado só se todas as fontes
+# em CONTENT_SOURCES falharem.
+def _source_apod(channel: sqlite3.Row, api_key: str) -> dict | None:
+    """NASA Astronomy Picture of the Day - fonte factual primária de sempre,
+    prioridade máxima quando rende uma explicação longa o bastante pra
+    embasar um roteiro de verdade."""
+    try:
+        apod = visual_source.fetch_apod(api_key=api_key)
+    except Exception:
+        return None
+    if not (apod and apod["asset"] and len(apod["explanation"]) > 100):
+        return None
+    return {
+        "topic": apod["title"], "image_query": apod["title"], "facts": apod["explanation"],
+        "assets": [apod["asset"]], "has_source": True, "apod": apod,
+    }
+
+
+def _source_news(channel: sqlite3.Row, api_key: str) -> dict | None:
+    """Notícia real recente de espaço/astronomia (Spaceflight News API), só
+    aceita se conseguir imagem de verdade pra ela (ver _choose_news_topic)."""
+    news_result = _choose_news_topic(channel)
+    if not news_result:
+        return None
+    topic, image_query, facts, assets = news_result
+    return {"topic": topic, "image_query": image_query, "facts": facts, "assets": assets, "has_source": True}
+
+
+CONTENT_SOURCES = [_source_apod, _source_news]
+
+
+def _source_rotation(channel: sqlite3.Row) -> dict:
+    """Fallback garantido - tema da lista rotativa configurada no canal, sem
+    fonte factual do dia pra checar. Nunca retorna None."""
+    topic, image_query = _choose_fallback_topic(channel)
+    facts = f"(sem explicação factual da APOD hoje - roteirista deve pesquisar sobre {topic} antes de gravar)"
+    return {"topic": topic, "image_query": image_query, "facts": facts, "assets": [], "has_source": False}
+
+
 def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | None = None) -> dict:
     """Retorna {"title", "script", "topic", "visual_assets", "fact_check"}.
 
@@ -758,34 +806,20 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         series = channel["series_fallback"]
     else:
         apod = None
-        try:
-            apod = visual_source.fetch_apod(api_key=api_key)
-        except Exception:
-            apod = None
+        result = None
+        for source_fn in CONTENT_SOURCES:
+            try:
+                result = source_fn(channel, api_key)
+            except Exception:
+                result = None
+            if result:
+                break
+        if not result:
+            result = _source_rotation(channel)
 
-        if apod and apod["asset"] and len(apod["explanation"]) > 100:
-            topic = apod["title"]
-            image_query = apod["title"]
-            facts = apod["explanation"]
-            assets = [apod["asset"]]
-            # Série "primária" - o vídeo tem uma fonte factual real e checável
-            # (APOD), diferente do fallback abaixo, que é tema genérico sem fonte
-            # do dia. Selo consistente ajuda o canal a ter identidade reconhecível
-            # mesmo trocando de assunto todo dia (ver roadmap de conteúdo).
-            series = channel["series_primary"]
-        else:
-            news_result = _choose_news_topic(channel)
-            if news_result:
-                topic, image_query, facts, assets = news_result
-                # Notícia real recente com fonte checável e imagem de verdade
-                # encontrada - mesmo status de "conteúdo com fonte factual"
-                # que a APOD, não o fallback fraco sem fonte.
-                series = channel["series_primary"]
-            else:
-                topic, image_query = _choose_fallback_topic(channel)
-                facts = f"(sem explicação factual da APOD hoje - roteirista deve pesquisar sobre {topic} antes de gravar)"
-                assets = []
-                series = channel["series_fallback"]
+        topic, image_query, facts, assets = result["topic"], result["image_query"], result["facts"], result["assets"]
+        series = channel["series_primary"] if result["has_source"] else channel["series_fallback"]
+        apod = result.get("apod")
 
     angle = random.choice(PROMPT_ANGLES)
     niche = channel["niche"] or "ciência"
