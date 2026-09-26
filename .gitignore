@@ -8,6 +8,8 @@ secrets/
 
 # Dados gerados/estado local - específicos da máquina, não do código
 data/catalog.db
+data/catalog.db-wal
+data/catalog.db-shm
 data/output/
 data/assets/nasa_cache/
 data/assets/embedding_model/

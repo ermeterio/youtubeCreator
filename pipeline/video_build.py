@@ -293,11 +293,22 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
 
     final = CompositeVideoClip(layers, size=(w, h)).subclipped(0, duration)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Escreve num arquivo temporário e só troca pro nome final DEPOIS do
+    # encode terminar com sucesso - orchestrator.py decide se retoma ou pula
+    # uma etapa só checando se o arquivo final existe, então uma escrita
+    # direta no nome final deixaria um vídeo TRUNCADO mas EXISTENTE se o
+    # processo morresse no meio do encode (queda de luz, restart, OOM do
+    # ffmpeg) - a próxima execução acharia "já pronto" e seguiria pro upload
+    # de um vídeo corrompido, sem erro nenhum. Rename é atômico no mesmo
+    # sistema de arquivos (mesma pasta aqui), então video.mp4 só existe de
+    # verdade quando está 100% completo.
+    tmp_path = output_path.with_suffix(output_path.suffix + ".partial")
     final.write_videofile(
-        str(output_path),
+        str(tmp_path),
         fps=config.VIDEO_FPS,
         codec="libx264",
         audio_codec="aac",
         threads=4,
     )
+    tmp_path.replace(output_path)
     return output_path

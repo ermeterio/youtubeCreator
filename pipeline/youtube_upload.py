@@ -23,15 +23,24 @@ então o disclosure de conteúdo A/S (alterado/sintético) é aplicado por padr�
 em todo vídeo publicado, conforme a política de rotulagem do YouTube.
 """
 
+import time
 from pathlib import Path
 
 import google.auth.transport.requests
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 import config
+
+# Códigos de erro tratados como transitórios pelo próprio guia da Google pra
+# upload resumable (5xx de servidor + 429 de rate limit) - vale tentar de
+# novo com backoff. Qualquer outro HttpError (4xx de autenticação/permissão,
+# por exemplo) é erro real, não adianta tentar de novo.
+_RETRYABLE_UPLOAD_STATUS = {429, 500, 502, 503, 504}
+_UPLOAD_RETRY_BACKOFF = (1, 2, 4, 8, 16)
 
 
 def _has_required_scopes(creds: Credentials) -> bool:
@@ -124,8 +133,26 @@ def upload_video(video_path: Path, title: str, description: str,
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
 
     response = None
+    retry_count = 0
     while response is None:
-        status, response = request.next_chunk()
+        try:
+            status, response = request.next_chunk()
+        except HttpError as exc:
+            if exc.resp.status not in _RETRYABLE_UPLOAD_STATUS or retry_count >= len(_UPLOAD_RETRY_BACKOFF):
+                raise
+            time.sleep(_UPLOAD_RETRY_BACKOFF[retry_count])
+            retry_count += 1
+        except (ConnectionError, TimeoutError, OSError):
+            # Soluço de rede transitório (timeout, conexão caiu no meio de um
+            # chunk) - a lib do Google recomenda explicitamente retry com
+            # backoff nesse loop pra upload resumable, em vez de abortar o
+            # upload inteiro por causa de 1 chunk que falhou.
+            if retry_count >= len(_UPLOAD_RETRY_BACKOFF):
+                raise
+            time.sleep(_UPLOAD_RETRY_BACKOFF[retry_count])
+            retry_count += 1
+        else:
+            retry_count = 0
 
     video_id = response["id"]
 

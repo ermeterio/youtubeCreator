@@ -37,6 +37,27 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       de qualidade daquele momento e timestamp - evidência estruturada de revisão editorial real, útil
       pra contestar um flag de "conteúdo inautêntico". Visível em `/approval_log`, linkado do relatório.
 
+## Hardening de produção (rodada 5, 26/09/2026 - achados de code review, não de mercado)
+- [x] **Escrita de vídeo não-atômica (risco real de publicar vídeo corrompido)** — `video_build.py`
+      escrevia direto no `video.mp4`/`short.mp4` final; se o processo morresse no meio do encode
+      (queda de luz, restart, OOM do ffmpeg), o arquivo ficava truncado mas EXISTENTE - o orchestrator
+      só checa `.exists()` pra decidir se retoma, então a próxima execução acharia "já pronto" e
+      seguiria pro upload de um vídeo quebrado, sem erro nenhum. Corrigido: escreve em `.partial` e só
+      troca pro nome final com `rename` atômico depois do encode terminar com sucesso.
+- [x] **SQLite sem WAL/busy_timeout ("database is locked" em uso concorrente)** — worker da fila
+      (thread própria), requests do Flask e o job das 3h abrem conexões concorrentes no mesmo arquivo
+      sem proteção contra lock. Corrigido (`catalog.get_conn()`: `PRAGMA journal_mode=WAL` +
+      `busy_timeout=10000`). Testado com 8 threads fazendo 240 escritas concorrentes - zero erros.
+- [x] **Upload sem retry em erro transitório** — o loop de `next_chunk()` em `youtube_upload.py`
+      abortava o upload inteiro em qualquer soluço de rede/5xx no meio de um chunk, sem chance de
+      retomada automática (a própria lib do Google recomenda retry com backoff nesse loop). Corrigido:
+      retry com backoff exponencial (1/2/4/8/16s) pra 429/5xx e erros de conexão; erros não-transitórios
+      (403, etc.) continuam propagando na hora, sem retry inútil. Testado com mock (2 falhas 503
+      seguidas de sucesso recupera corretamente; 403 propaga sem retry).
+- [~] Escrita não-atômica em `narration.py` foi investigada e descartada como risco real: o status do
+      track só avança pra "resumível" DEPOIS que a narração+pós-processamento terminam com sucesso, então
+      uma falha no meio da síntese já aborta a geração inteira (não resume com arquivo truncado).
+
 ## Agora / próximo trimestre
 - [x] **Divulgação de IA correta** (`containsSyntheticMedia`) — DONE (25/09/2026)
 - [x] **Correção de relevância de imagens** (fallback tópico-aware, remoção de "spacecraft" genérico do

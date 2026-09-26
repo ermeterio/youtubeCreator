@@ -115,8 +115,16 @@ _MIGRATION_COLUMNS = {
 
 @contextmanager
 def get_conn():
+    # WAL permite leitores e um escritor concorrentes sem se bloquearem, e
+    # busy_timeout faz o SQLite ESPERAR (até 10s) por um lock em vez de
+    # levantar "database is locked" na hora - sem isso, o worker da fila
+    # (thread própria), as requests do Flask (múltiplas threads) e o job
+    # agendado das 3h abrindo conexões curtas e concorrentes no mesmo
+    # arquivo é receita clássica pra esse erro em picos de uso simultâneo.
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(config.CATALOG_DB)
+    conn = sqlite3.connect(config.CATALOG_DB, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.row_factory = sqlite3.Row
     try:
         yield conn
