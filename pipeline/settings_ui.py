@@ -417,7 +417,7 @@ KIT_FORM = """
 """
 
 CHANNEL_FORM = """
-<h2>{{ title }}</h2>
+{% if title %}<h2>{{ title }}</h2>{% endif %}
 <form method="post">
   <label>Nome do canal</label>
   <input type="text" name="name" value="{{ ch.name if ch else '' }}" {{ 'readonly' if ch else '' }} required>
@@ -535,8 +535,6 @@ def _parse_topics(raw: str) -> list[tuple[str, str]]:
 
 
 CREDENTIALS_FORM = """
-<h2>Conexão com o YouTube - {{ ch.name }}</h2>
-
 {% if ch.connected_youtube_channel_title %}
 <div class="panel accent" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
   {% if ch.connected_youtube_channel_thumbnail %}
@@ -616,7 +614,19 @@ def edit_channel(channel_id: int):
             series_fallback=request.form.get("series_fallback", "").strip() or ch["series_fallback"],
         )
         _flash("Canal atualizado.")
-        return redirect(url_for("edit_channel", channel_id=channel_id))
+        return redirect(url_for("edit_channel", channel_id=channel_id, tab="dados"))
+
+    # Página quebrada em abas - antes era um scroll único com 7+
+    # responsabilidades diferentes (dados, OAuth, ativar/desativar, excluir),
+    # relatado como a tela mais sobrecarregada do app.
+    tab = request.args.get("tab", "dados")
+    tab_nav = f"""
+    <nav style="margin-bottom:1.5rem;">
+      <a href="{url_for('edit_channel', channel_id=channel_id, tab='dados')}" class="{'active' if tab == 'dados' else ''}">📋 Dados do canal</a>
+      <a href="{url_for('edit_channel', channel_id=channel_id, tab='youtube')}" class="{'active' if tab == 'youtube' else ''}">🔑 Credenciais YouTube</a>
+      <a href="{url_for('edit_channel', channel_id=channel_id, tab='risco')}" class="{'active' if tab == 'risco' else ''}">⚠️ Zona de risco</a>
+    </nav>
+    """
 
     studio_cta = f"""
     <p>
@@ -627,55 +637,65 @@ def edit_channel(channel_id: int):
       <a class="btn secondary" href="{url_for('weekly_report', channel_id=channel_id)}">📈 Desempenho deste canal</a>
     </p>
     """
+    header = f"""
+    <p><a href="{url_for('index')}">&larr; Voltar pra lista de canais</a></p>
+    <h2>Editar canal: {ch['name']}</h2>
+    {studio_cta}
+    {tab_nav}
+    """
 
+    if tab == "youtube":
+        secret_path = channels.client_secret_path(ch["slug"])
+        existing_secret = secret_path.read_text(encoding="utf-8") if secret_path.exists() else ""
+        duplicate_warning = None
+        if ch["connected_youtube_channel_id"]:
+            others = [
+                other["name"] for other in channels.list_channels()
+                if other["id"] != channel_id and other["connected_youtube_channel_id"] == ch["connected_youtube_channel_id"]
+            ]
+            if others:
+                duplicate_warning = (
+                    f"Este mesmo canal do YouTube também está conectado a: {', '.join(others)}. "
+                    "Se a intenção era ter canais SEPARADOS, um deles está apontando pro canal errado."
+                )
+        body = header + render_template_string(
+            CREDENTIALS_FORM, ch=ch, existing_secret=existing_secret,
+            has_secret=_is_valid_oauth_secret(ch["slug"]),
+            authorize_status=_authorize_status.get(channel_id, ""),
+            duplicate_warning=duplicate_warning,
+        )
+        return _render(body)
+
+    if tab == "risco":
+        toggle_label = "Desativar canal" if ch["active"] else "Ativar canal"
+        body = header + f"""
+        <div class="panel">
+          <h3 style="margin-top:0;">Ativar/desativar</h3>
+          <p class="muted">Canal desativado não entra no agendamento diário automático, mas continua
+          existindo e pode ser reativado a qualquer momento.</p>
+          <form method="post" action="{url_for('toggle_active', channel_id=channel_id)}">
+            <button type="submit" class="secondary">{toggle_label}</button>
+          </form>
+        </div>
+        <div class="panel warn">
+          <h3 style="margin-top:0; color: var(--missing-fg);">Excluir canal</h3>
+          <p class="muted">Remove o canal do YouTube Content Creator (configuração + arquivos locais). Vídeos já
+          publicados no YouTube NÃO são apagados por isso - exclua-os em "▶️ No YouTube" ou
+          diretamente no YouTube, se quiser, antes de excluir o canal aqui.</p>
+          <form method="post" action="{url_for('delete_channel_route', channel_id=channel_id)}"
+                onsubmit="return confirm('Excluir o canal \\'{ch['name']}\\' do YouTube Content Creator? Isso apaga a configuração e os arquivos locais (vídeos/áudio/credenciais salvas aqui). Vídeos já publicados no YouTube continuam lá. Essa ação não pode ser desfeita.');">
+            <button type="submit" class="secondary">Excluir canal "{ch['name']}"</button>
+          </form>
+        </div>
+        """
+        return _render(body)
+
+    # tab == "dados" (padrão)
     topics_text = "\n".join(f"{label} | {query}" for label, query in channels.topics_for(ch))
-    form_body = studio_cta + render_template_string(
-        CHANNEL_FORM, title=f"Editar canal: {ch['name']}", ch=ch, topics_text=topics_text,
+    body = header + render_template_string(
+        CHANNEL_FORM, title="", ch=ch, topics_text=topics_text,
         languages=config.LANGUAGES, default_language=config.DEFAULT_LANGUAGE,
     )
-
-    secret_path = channels.client_secret_path(ch["slug"])
-    existing_secret = secret_path.read_text(encoding="utf-8") if secret_path.exists() else ""
-
-    duplicate_warning = None
-    if ch["connected_youtube_channel_id"]:
-        others = [
-            other["name"] for other in channels.list_channels()
-            if other["id"] != channel_id and other["connected_youtube_channel_id"] == ch["connected_youtube_channel_id"]
-        ]
-        if others:
-            duplicate_warning = (
-                f"Este mesmo canal do YouTube também está conectado a: {', '.join(others)}. "
-                "Se a intenção era ter canais SEPARADOS, um deles está apontando pro canal errado."
-            )
-
-    creds_body = render_template_string(
-        CREDENTIALS_FORM, ch=ch, existing_secret=existing_secret,
-        has_secret=_is_valid_oauth_secret(ch["slug"]),
-        authorize_status=_authorize_status.get(channel_id, ""),
-        duplicate_warning=duplicate_warning,
-    )
-
-    toggle_label = "Desativar canal" if ch["active"] else "Ativar canal"
-    delete_section = f"""
-    <div class="panel warn">
-      <h3 style="margin-top:0; color: var(--missing-fg);">Excluir canal</h3>
-      <p class="muted">Remove o canal do YouTube Content Creator (configuração + arquivos locais). Vídeos já
-      publicados no YouTube NÃO são apagados por isso - exclua-os em "▶️ No YouTube" ou
-      diretamente no YouTube, se quiser, antes de excluir o canal aqui.</p>
-      <form method="post" action="{url_for('delete_channel_route', channel_id=channel_id)}"
-            onsubmit="return confirm('Excluir o canal \\'{ch['name']}\\' do YouTube Content Creator? Isso apaga a configuração e os arquivos locais (vídeos/áudio/credenciais salvas aqui). Vídeos já publicados no YouTube continuam lá. Essa ação não pode ser desfeita.');">
-        <button type="submit" class="secondary">Excluir canal "{ch['name']}"</button>
-      </form>
-    </div>
-    """
-    body = form_body + creds_body + f"""
-    <form method="post" action="{url_for('toggle_active', channel_id=channel_id)}">
-      <button type="submit" class="secondary">{toggle_label}</button>
-    </form>
-    {delete_section}
-    <p><a href="{url_for('index')}">&larr; Voltar</a></p>
-    """
     return _render(body)
 
 
@@ -687,7 +707,7 @@ def save_client_secret(channel_id: int):
         parsed = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         _flash("JSON inválido - confira se colou o conteúdo completo do client_secret.json.")
-        return redirect(url_for("edit_channel", channel_id=channel_id))
+        return redirect(url_for("edit_channel", channel_id=channel_id, tab="youtube"))
 
     if parsed.get("type") == "service_account":
         _flash(
@@ -696,18 +716,18 @@ def save_client_secret(channel_id: int):
             "'ID do cliente OAuth' → tipo de aplicativo 'Aplicativo para computador' (Desktop app), e baixe "
             "o JSON gerado ali - ele deve ter uma chave \"installed\" ou \"web\" no topo, não \"type\": \"service_account\"."
         )
-        return redirect(url_for("edit_channel", channel_id=channel_id))
+        return redirect(url_for("edit_channel", channel_id=channel_id, tab="youtube"))
 
     if "installed" not in parsed and "web" not in parsed:
         _flash(
             "Esse JSON não parece ser um client_secret.json de OAuth 'Desktop app' válido "
             "(esperava uma chave \"installed\" ou \"web\" no topo). Confira se baixou o arquivo certo."
         )
-        return redirect(url_for("edit_channel", channel_id=channel_id))
+        return redirect(url_for("edit_channel", channel_id=channel_id, tab="youtube"))
 
     atomic_io.atomic_write_text(channels.client_secret_path(ch["slug"]), raw)
     _flash("Credenciais salvas. Agora clique em 'Autorizar no YouTube'.")
-    return redirect(url_for("edit_channel", channel_id=channel_id))
+    return redirect(url_for("edit_channel", channel_id=channel_id, tab="youtube"))
 
 
 def _run_authorization(channel_id: int, force_new: bool) -> None:
@@ -736,7 +756,7 @@ def authorize_channel(channel_id: int):
         "Autorização iniciada - uma janela do navegador deve abrir. Se a conta gerenciar mais de um "
         "canal, o Google vai perguntar QUAL usar - escolha com atenção. Atualize a página em alguns segundos."
     )
-    return redirect(url_for("edit_channel", channel_id=channel_id))
+    return redirect(url_for("edit_channel", channel_id=channel_id, tab="youtube"))
 
 
 @app.route("/channels/<int:channel_id>/reconnect", methods=["POST"])
@@ -747,14 +767,14 @@ def reconnect_channel(channel_id: int):
         "Desconectado. Nova autorização iniciada com a tela de escolha de conta/canal forçada a "
         "aparecer de novo - escolha o canal certo no navegador que abrir."
     )
-    return redirect(url_for("edit_channel", channel_id=channel_id))
+    return redirect(url_for("edit_channel", channel_id=channel_id, tab="youtube"))
 
 
 @app.route("/channels/<int:channel_id>/toggle_active", methods=["POST"])
 def toggle_active(channel_id: int):
     ch = channels.get_channel(channel_id)
     channels.update_channel(channel_id, active=0 if ch["active"] else 1)
-    return redirect(url_for("edit_channel", channel_id=channel_id))
+    return redirect(url_for("edit_channel", channel_id=channel_id, tab="risco"))
 
 
 @app.route("/channels/<int:channel_id>/delete", methods=["POST"])
