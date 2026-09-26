@@ -43,6 +43,25 @@ def _cosine(a, b) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
 
 
+def average_relevance(query: str, candidates: list, text_fn=lambda c: c.title) -> float | None:
+    """Score médio (0-1) de quão relacionados `candidates` estão de `query` -
+    usado pro score de qualidade agregado do vídeo (ver script_gen.
+    compute_quality_score), não pra filtrar/rejeitar nada. Retorna None se
+    não houver candidatos ou o modelo não carregar."""
+    if not candidates:
+        return None
+    try:
+        model = _get_model()
+        texts = [query] + [text_fn(c) for c in candidates]
+        vectors = list(model.embed(texts))
+    except Exception:
+        return None
+
+    query_vec = vectors[0]
+    scores = [_cosine(query_vec, vec) for vec in vectors[1:]]
+    return sum(scores) / len(scores)
+
+
 def filter_relevant(query: str, candidates: list, text_fn=lambda c: c.title,
                      min_score: float = MIN_RELEVANCE_SCORE) -> list:
     """Filtra `candidates` mantendo só os semanticamente relacionados a

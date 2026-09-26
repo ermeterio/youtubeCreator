@@ -126,10 +126,20 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         # Segunda passada do LLM simulando um espectador leigo - sinaliza
         # trechos confusos/redundantes ANTES da revisão humana, sem travar o
         # pipeline se o Ollama não responder.
+        clarity = None
         try:
             clarity = script_gen.clarity_review(script, channel["niche"] or "ciência")
             if clarity:
                 catalog.update_track(track_id, clarity_review=clarity)
+        except Exception:
+            pass
+
+        # Score agregado (fatos + clareza + relevância real das imagens) -
+        # resumo rápido pro revisor, calculado uma vez após os outros dois
+        # sinais estarem prontos. Não bloqueia se falhar por qualquer motivo.
+        try:
+            score, breakdown = script_gen.compute_quality_score(fact_check, clarity, assets, topic)
+            catalog.update_track(track_id, quality_score=score, quality_breakdown=breakdown)
         except Exception:
             pass
 

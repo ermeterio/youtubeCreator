@@ -84,6 +84,8 @@ _MIGRATION_COLUMNS = {
         "active_thumbnail": "TEXT NOT NULL DEFAULT 'a'",
         "published_at": "TEXT",
         "thumbnail_rotated_at": "TEXT",
+        "quality_score": "INTEGER",
+        "quality_breakdown": "TEXT",
     },
     "channels": {
         "series_primary": "TEXT NOT NULL DEFAULT 'Direto da Fonte'",

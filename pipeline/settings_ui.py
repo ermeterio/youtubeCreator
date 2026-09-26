@@ -696,7 +696,7 @@ def _video_grid_html(channel_id: int) -> str:
           {thumb_html}
           <div class="video-grid-caption">
             <div class="video-grid-title">{t['title']}</div>
-            {_status_badge(t['status'])} {_fact_check_badge(t['fact_check_flag'])}
+            {_status_badge(t['status'])} {_fact_check_badge(t['fact_check_flag'])} {_quality_badge(t)}
           </div>
         </div>
         """
@@ -734,7 +734,7 @@ def _video_grid_html(channel_id: int) -> str:
         modals += f"""
         <div id="video-modal-src-{t['id']}" style="display:none;">
           <h3 style="margin-top:0;">{t['title']}</h3>
-          <p>{_status_badge(t['status'])} {_fact_check_badge(t['fact_check_flag'])}
+          <p>{_status_badge(t['status'])} {_fact_check_badge(t['fact_check_flag'])} {_quality_badge(t)}
              {f'<span class="badge inactive">série: {t["series"]}</span>' if t['series'] else ''}</p>
           <div class="cols">
             <div style="flex:2;">{video_html}</div>
@@ -1299,6 +1299,16 @@ def _fact_check_badge(flag: str | None) -> str:
     return '<span class="badge inactive">fact-check indisponível</span>'
 
 
+def _quality_badge(track) -> str:
+    score = track["quality_score"] if "quality_score" in track.keys() else None
+    if score is None:
+        return ""
+    cls = "ok" if score >= 75 else ("missing" if score >= 50 else "inactive")
+    breakdown = track["quality_breakdown"] if "quality_breakdown" in track.keys() else ""
+    title_attr = f' title="{breakdown}"' if breakdown else ""
+    return f'<span class="badge {cls}"{title_attr}>⭐ qualidade {score}/100</span>'
+
+
 def _privacy_select(field_id: str = "privacy_status") -> str:
     # "Visibilidade" (não "privacidade") - termo que o YouTube Studio usa pra
     # essa mesma opção, pra quem já usa o YouTube reconhecer de cara.
@@ -1569,7 +1579,7 @@ def video_detail(track_id: int):
     body = f"""
     <p><a href="{url_for('list_videos')}">&larr; Voltar para a lista</a></p>
     <h2>{track['title']}</h2>
-    <p>{_status_badge(track['status'])} {_fact_check_badge(track['fact_check_flag'])} {feedback_badge} {ab_badge}
+    <p>{_status_badge(track['status'])} {_fact_check_badge(track['fact_check_flag'])} {_quality_badge(track)} {feedback_badge} {ab_badge}
        <span class="badge inactive">canal: {channel['name']}</span>
        {f'<span class="badge inactive">série: {track["series"]}</span>' if track['series'] else ''}
     </p>
