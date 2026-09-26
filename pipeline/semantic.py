@@ -87,6 +87,46 @@ def max_similarity(text: str, recent_texts: list[str]) -> float | None:
     return max(_cosine(query_vec, vec) for vec in vectors[1:])
 
 
+def pairwise_high_similarity_fraction(texts: list[str], threshold: float = REPETITION_THRESHOLD) -> dict | None:
+    """Fração de itens de `texts` que têm ALGUM outro item na mesma lista
+    acima de `threshold` de similaridade - sinal de "sameness" estrutural do
+    conjunto inteiro, não só do item mais recente contra o histórico (ver
+    max_similarity). Usado pro "Channel Sameness Audit" (ROADMAP.md): a
+    política do YouTube de "inauthentic content" (2026) pune no nível do
+    CANAL quando uma fração alta do watch time vem de vídeos com pouca
+    variação estrutural entre si, não só título repetido individualmente.
+    Retorna None se a amostra for pequena demais (< 8) pra não gerar ruído."""
+    if len(texts) < 8:
+        return None
+    try:
+        model = _get_model()
+        vectors = list(model.embed(texts))
+    except Exception:
+        return None
+
+    n = len(vectors)
+    flagged_pairs = []
+    flagged_count = 0
+    for i in range(n):
+        best_score, best_j = 0.0, None
+        for j in range(n):
+            if i == j:
+                continue
+            score = _cosine(vectors[i], vectors[j])
+            if score > best_score:
+                best_score, best_j = score, j
+        if best_score >= threshold:
+            flagged_count += 1
+            flagged_pairs.append((i, best_j, best_score))
+
+    return {
+        "sample_size": n,
+        "flagged_count": flagged_count,
+        "fraction": flagged_count / n,
+        "flagged_pairs": flagged_pairs,
+    }
+
+
 def filter_relevant(query: str, candidates: list, text_fn=lambda c: c.title,
                      min_score: float = MIN_RELEVANCE_SCORE) -> list:
     """Filtra `candidates` mantendo só os semanticamente relacionados a

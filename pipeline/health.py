@@ -14,7 +14,13 @@ algo mudou de um jeito que merece atenção humana.
 from datetime import date, datetime, timedelta, timezone
 
 import config
-from pipeline import catalog, channels, notify, youtube_analytics, youtube_upload
+from pipeline import catalog, channels, notify, semantic, youtube_analytics, youtube_upload
+
+# Fração de vídeos com alta similaridade estrutural entre si acima da qual
+# alertamos - a política de "inauthentic content" do YouTube (2026) pune no
+# nível do CANAL quando uma fração alta do watch time vem de conteúdo
+# template-based, não só vídeo a vídeo (ver ROADMAP.md).
+SAMENESS_ALERT_FRACTION = 0.5
 
 
 def _stored_video_count_key(channel_id: int) -> str:
@@ -166,3 +172,40 @@ def run_thumbnail_ab_tests() -> list[str]:
                     notify.log(f"[{channel['name']}] Teste A/B: falha ao comparar/decidir - {exc}")
 
     return results
+
+
+def audit_channel_sameness(limit_per_channel: int = 25) -> list[str]:
+    """"Channel Sameness Audit" - a política de "inauthentic content" do
+    YouTube (2026) pune no nível do CANAL quando uma fração alta do watch
+    time vem de vídeos com pouca variação estrutural entre si (roteiro
+    "template-based"), não só título/hook repetido individualmente (esse
+    caso já é pego por script_gen.compute_quality_score por vídeo). Reusa o
+    fastembed já validado em produção pra comparar o roteiro de cada vídeo
+    recente contra todos os outros e alertar se uma fração grande demais se
+    parece entre si - sinal cedo de risco de desmonetização, não uma
+    decisão automática de nada."""
+    warnings = []
+    for channel in channels.list_channels(active_only=True):
+        tracks = [t for t in catalog.list_tracks(channel_id=channel["id"], limit=limit_per_channel) if t["script"]]
+        texts = [f"{t['title']} {t['script'][:400]}" for t in tracks]
+        result = semantic.pairwise_high_similarity_fraction(texts)
+        if not result:
+            continue  # amostra pequena demais ainda - nada a avaliar
+
+        if result["fraction"] >= SAMENESS_ALERT_FRACTION:
+            pct = round(result["fraction"] * 100)
+            msg = (
+                f"[{channel['name']}] Auditoria de similaridade: {pct}% dos últimos "
+                f"{result['sample_size']} vídeos são muito parecidos entre si (roteiro/gancho) - "
+                f"risco real de ser lido como conteúdo 'template-based' pela política do YouTube. "
+                f"Varie mais o ângulo/estrutura dos próximos roteiros."
+            )
+            notify.notify_result(False, msg)
+            warnings.append(msg)
+        else:
+            notify.log(
+                f"[{channel['name']}] Auditoria de similaridade: {round(result['fraction'] * 100)}% "
+                f"de {result['sample_size']} vídeos parecidos entre si - dentro do esperado."
+            )
+
+    return warnings

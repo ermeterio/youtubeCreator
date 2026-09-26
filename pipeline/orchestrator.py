@@ -220,6 +220,7 @@ def run_all_active_channels() -> list[int]:
         from pipeline import health
         health.check_channels_health()
         health.run_thumbnail_ab_tests()
+        health.audit_channel_sameness()
     except Exception as exc:
         notify.log(f"Checagem de saúde dos canais falhou (não bloqueia a geração): {exc}")
 

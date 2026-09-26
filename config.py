@@ -1,6 +1,15 @@
 import os
 from pathlib import Path
 
+from PIL import Image
+
+# As imagens processadas aqui vêm só de fontes confiáveis (APIs oficiais da
+# NASA/ESA), nunca de upload de terceiros - desativa o limite de "bomba de
+# descompressão" do Pillow (pensado pra proteger contra upload malicioso),
+# que já derrubou a geração diária inteira ao encontrar uma imagem real e
+# legítima da NASA maior que o limite padrão (~178 milhões de pixels).
+Image.MAX_IMAGE_PIXELS = None
+
 BASE_DIR = Path(__file__).resolve().parent
 
 DATA_DIR = BASE_DIR / "data"

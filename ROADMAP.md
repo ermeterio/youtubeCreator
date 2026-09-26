@@ -18,6 +18,21 @@ pode deixar esse item preso em `running` pra sempre (a thread que o processava m
 processo). O worker agora se auto-recupera disso no próximo start (`queue_worker._recover_stale_running_items`),
 mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
 
+## Achados de produção (26/09/2026)
+- [x] **Bug real: imagem grande da NASA derrubava a geração diária inteira** — a execução agendada das
+      3h falhou por completo com "Image size (256000000 pixels) exceeds limit... decompression bomb DOS
+      attack" (guarda de segurança do Pillow contra upload malicioso). Como as imagens aqui vêm só de
+      APIs oficiais confiáveis (NASA/ESA), nunca de terceiro não confiável, o limite foi desativado
+      (`config.py`, `Image.MAX_IMAGE_PIXELS = None`). Confirmado: retomar o vídeo travado (track 24)
+      completou com sucesso depois da correção.
+- [x] **"Channel Sameness Audit"** — pesquisa de mercado (rodada 4) achou risco novo e documentado: a
+      política de "inauthentic content" do YouTube (2026) pune no nível do CANAL (não só por vídeo)
+      quando uma fração alta do watch time vem de conteúdo "template-based". Reusa o fastembed já
+      validado: `semantic.pairwise_high_similarity_fraction()` compara o roteiro de cada vídeo recente
+      contra todos os outros do canal e alerta (toast) se ≥50% forem parecidos demais entre si. Rodado
+      junto do health check diário. Testado com um conjunto sintético (7/8 roteiros "template" vs 1
+      diferente) - detectou corretamente 87.5% de similaridade, threshold funcionando como esperado.
+
 ## Agora / próximo trimestre
 - [x] **Divulgação de IA correta** (`containsSyntheticMedia`) — DONE (25/09/2026)
 - [x] **Correção de relevância de imagens** (fallback tópico-aware, remoção de "spacecraft" genérico do
