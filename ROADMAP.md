@@ -32,6 +32,10 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       contra todos os outros do canal e alerta (toast) se ≥50% forem parecidos demais entre si. Rodado
       junto do health check diário. Testado com um conjunto sintético (7/8 roteiros "template" vs 1
       diferente) - detectou corretamente 87.5% de similaridade, threshold funcionando como esperado.
+- [x] **Log de auditoria de aprovação humana** — DONE (26/09/2026), item secundário da rodada 4. Tabela
+      append-only `approval_log` registra cada decisão de aprovar/rejeitar (vídeo ou Short) com o score
+      de qualidade daquele momento e timestamp - evidência estruturada de revisão editorial real, útil
+      pra contestar um flag de "conteúdo inautêntico". Visível em `/approval_log`, linkado do relatório.
 
 ## Agora / próximo trimestre
 - [x] **Divulgação de IA correta** (`containsSyntheticMedia`) — DONE (25/09/2026)

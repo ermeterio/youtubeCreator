@@ -1756,7 +1756,9 @@ def _privacy_from_form() -> str:
 def approve_video(track_id: int):
     privacy_status = _privacy_from_form()
     try:
+        track = catalog.get_track(track_id)
         video_id = orchestrator.approve_and_upload(track_id, privacy_status=privacy_status)
+        catalog.log_approval_decision(track_id, track["channel_id"], "approved_video", track["quality_score"])
         _flash(f"Vídeo publicado ({_PRIVACY_LABELS[privacy_status]}): https://youtube.com/watch?v={video_id}")
     except Exception as exc:
         _flash(f"Falha ao publicar o vídeo: {exc}")
@@ -1767,7 +1769,9 @@ def approve_video(track_id: int):
 def approve_short(track_id: int):
     privacy_status = _privacy_from_form()
     try:
+        track = catalog.get_track(track_id)
         video_id = orchestrator.approve_and_upload_short(track_id, privacy_status=privacy_status)
+        catalog.log_approval_decision(track_id, track["channel_id"], "approved_short", track["quality_score"])
         _flash(f"Short publicado ({_PRIVACY_LABELS[privacy_status]}): https://youtube.com/shorts/{video_id}")
     except Exception as exc:
         _flash(f"Falha ao publicar o Short: {exc}")
@@ -1776,7 +1780,9 @@ def approve_short(track_id: int):
 
 @app.route("/videos/<int:track_id>/reject", methods=["POST"])
 def reject_video(track_id: int):
+    track = catalog.get_track(track_id)
     catalog.update_track(track_id, status="rejected")
+    catalog.log_approval_decision(track_id, track["channel_id"], "rejected", track["quality_score"])
     _flash("Vídeo marcado como rejeitado - os arquivos continuam em data/output/ se quiser recuperar.")
     return _return_after_action(track_id)
 
@@ -1949,12 +1955,43 @@ def weekly_report():
       </select>
       <input type="hidden" name="days" value="{days}">
     </form>
-    <p>{period_links}</p>
+    <p>{period_links} <a class="btn secondary" href="{url_for('approval_log_view', channel_id=channel_id)}">📋 Log de aprovações</a></p>
     {insight}
     {no_data_note}
     <table>
       <tr><th>Canal</th><th>Série</th><th>Vídeos</th><th>Views</th><th>% média assistida</th><th>Min. assistidos</th><th>Likes</th></tr>
       {table_rows}
+    </table>
+    """
+    return _render(body, active_nav="reports")
+
+
+@app.route("/approval_log")
+def approval_log_view():
+    channel_id = request.args.get("channel_id", type=int)
+    entries = catalog.list_approval_log(channel_id=channel_id, limit=200)
+    channel_map = {c["id"]: c["name"] for c in channels.list_channels()}
+
+    decision_labels = {
+        "approved_video": "✅ vídeo aprovado", "approved_short": "✅ Short aprovado", "rejected": "❌ rejeitado",
+    }
+    rows_html = "".join(
+        f"<tr><td>{e['created_at'][:16].replace('T', ' ')}</td>"
+        f"<td>{channel_map.get(e['channel_id'], '?')}</td>"
+        f"<td><a href=\"{url_for('video_detail', track_id=e['track_id'])}\">track {e['track_id']}</a></td>"
+        f"<td>{decision_labels.get(e['decision'], e['decision'])}</td>"
+        f"<td>{e['quality_score'] if e['quality_score'] is not None else '-'}</td></tr>"
+        for e in entries
+    )
+    body = f"""
+    <p><a href="{url_for('weekly_report')}">&larr; Voltar pro relatório</a></p>
+    <h2>📋 Log de aprovações</h2>
+    <p class="muted">Registro append-only de cada decisão humana de aprovar/rejeitar um vídeo, com o
+    score de qualidade automático daquele momento - evidência de revisão editorial real, útil em caso
+    de contestar um flag de "conteúdo inautêntico" do YouTube.</p>
+    <table>
+      <tr><th>Data (UTC)</th><th>Canal</th><th>Vídeo</th><th>Decisão</th><th>Score</th></tr>
+      {rows_html or '<tr><td colspan="5" class="muted">Nenhuma decisão registrada ainda.</td></tr>'}
     </table>
     """
     return _render(body, active_nav="reports")

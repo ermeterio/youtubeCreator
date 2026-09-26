@@ -63,6 +63,20 @@ CREATE TABLE IF NOT EXISTS tracks (
     status TEXT NOT NULL DEFAULT 'planned',
     created_at TEXT NOT NULL
 );
+
+-- Registro de cada decisão humana de aprovar/rejeitar um vídeo (com o
+-- score de qualidade automático daquele momento) - evidência estruturada
+-- de "controle editorial significativo" caso o canal precise contestar um
+-- flag de "inauthentic content" da política do YouTube (ver ROADMAP.md).
+-- Append-only por design: nunca é atualizado ou apagado, só inserido.
+CREATE TABLE IF NOT EXISTS approval_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    decision TEXT NOT NULL,
+    quality_score INTEGER,
+    created_at TEXT NOT NULL
+);
 """
 
 # Colunas adicionadas depois da criação inicial da tabela - CREATE TABLE IF
@@ -159,6 +173,29 @@ def get_track(track_id: int) -> sqlite3.Row:
     with get_conn() as conn:
         cur = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
         return cur.fetchone()
+
+
+def log_approval_decision(track_id: int, channel_id: int, decision: str, quality_score: int | None) -> None:
+    """Registra uma decisão humana de aprovar/rejeitar - append-only,
+    evidência de revisão editorial real por vídeo (ver nota no schema)."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO approval_log (track_id, channel_id, decision, quality_score, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (track_id, channel_id, decision, quality_score, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def list_approval_log(channel_id: int | None = None, limit: int = 200) -> list[sqlite3.Row]:
+    query = "SELECT * FROM approval_log"
+    params: tuple = ()
+    if channel_id is not None:
+        query += " WHERE channel_id = ?"
+        params = (channel_id,)
+    query += " ORDER BY id DESC LIMIT ?"
+    params = params + (limit,)
+    with get_conn() as conn:
+        return conn.execute(query, params).fetchall()
 
 
 def list_tracks(channel_id: int | None = None, limit: int = 200) -> list[sqlite3.Row]:
