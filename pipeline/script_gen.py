@@ -375,18 +375,28 @@ def _seo_performance_section(channel_id: int, limit: int = 3, min_sample: int = 
         if len(per_video) < min_sample:
             return ""
 
-        local_by_youtube_id = {
-            t["youtube_video_id"]: t["title"]
-            for t in catalog.list_tracks(channel_id=channel_id, limit=200)
-            if t["youtube_video_id"]
-        }
+        local_by_youtube_id = {}
+        for t in catalog.list_tracks(channel_id=channel_id, limit=200):
+            if t["youtube_video_id"]:
+                local_by_youtube_id[t["youtube_video_id"]] = (t["title"], False)
+            if t["youtube_short_video_id"]:
+                local_by_youtube_id[t["youtube_short_video_id"]] = (t["title"], True)
 
         scored = []
+        shorts_below_cutoff = []
         for video_id, metrics in per_video.items():
-            title = local_by_youtube_id.get(video_id)
+            entry = local_by_youtube_id.get(video_id)
             pct = metrics.get("averageViewPercentage")
-            if title and pct is not None:
-                scored.append((title, float(pct)))
+            if not entry or pct is None:
+                continue
+            title, is_short = entry
+            scored.append((title, float(pct)))
+            # Shorts abaixo de ~70% de retenção nos primeiros minutos tendem a
+            # perder a janela de distribuição prioritária do YouTube (achado
+            # de pesquisa de mercado 2026, ver ROADMAP.md) - sinal mais
+            # acionável pro LLM que só "retenção baixa" genérico.
+            if is_short and float(pct) < 70:
+                shorts_below_cutoff.append((title, float(pct)))
         if len(scored) < min_sample:
             return ""
 
@@ -403,6 +413,13 @@ def _seo_performance_section(channel_id: int, limit: int = 3, min_sample: int = 
         if worst:
             worst_block = "\n".join(f'- "{t}" ({pct:.0f}% de retenção média)' for t, pct in worst)
             section += f"Títulos com retenção mais BAIXA (evite repetir esse padrão de título/abertura):\n{worst_block}\n"
+        if shorts_below_cutoff:
+            cutoff_block = "\n".join(f'- "{t}" ({pct:.0f}%)' for t, pct in shorts_below_cutoff[:limit])
+            section += (
+                f"ATENÇÃO - Shorts abaixo de 70% de retenção (o YouTube reduz a distribuição de Shorts "
+                f"que não seguram atenção nos primeiros segundos): capriche ESPECIALMENTE no gancho "
+                f"inicial pra evitar repetir esse padrão:\n{cutoff_block}\n"
+            )
         return section
     except Exception:
         return ""

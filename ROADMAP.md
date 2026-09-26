@@ -95,10 +95,10 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       refresh agora levanta erro claro e imediato ("reautorize esse canal") em vez de travar. Health
       check diário também ganhou alerta destacado (toast) específico pra esse caso. Testado com um
       token forjado (refresh_token inválido) - confirma erro claro em vez de travamento.
-- [ ] **Feedback de retenção com corte de 70% em Shorts** — pesquisa (rodada 3) achou que a
-      distribuição de Shorts depende de bater ~70% de retenção nos primeiros 30-60min. Estender o
-      few-shot já existente pra marcar vídeos abaixo desse corte como exemplo negativo explícito
-      ("hook fraco"), usando dados já coletados da Analytics API. Esforço: S. Sem API nova.
+- [x] **Feedback de retenção com corte de 70% em Shorts** — DONE (26/09/2026). `_seo_performance_section`
+      agora distingue Shorts de vídeos longos (via `youtube_short_video_id`) e sinaliza explicitamente
+      Shorts abaixo de 70% de retenção como exemplo negativo pro próximo roteiro, com a explicação de
+      *por que* isso importa (corte de distribuição), não só "retenção baixa" genérico.
 - [ ] **Aviso de janela crítica de publicação** — sugerir automaticamente o horário de publicação com
       maior chance de engajamento nos primeiros 30-60min, usando dados históricos já acessíveis via
       Analytics API por canal. Puramente informativo. Esforço: S/M.
