@@ -110,6 +110,7 @@ LANGUAGES = {
         "cta_text": "Inscreva-se no canal →",
         "default_series_primary": "Direto da Fonte",
         "default_series_fallback": "Round-up Rápido",
+        "preview_text": "Esta é uma prévia da voz de narração deste canal, usada pra ler o roteiro dos vídeos.",
         "voice_options": {
             "antonio": "pt-BR-AntonioNeural",
             "francisca": "pt-BR-FranciscaNeural",
@@ -124,6 +125,7 @@ LANGUAGES = {
         "cta_text": "Subscribe to the channel →",
         "default_series_primary": "Straight From The Source",
         "default_series_fallback": "Quick Roundup",
+        "preview_text": "This is a preview of this channel's narration voice, used to read the video scripts.",
         "voice_options": {
             "guy": "en-US-GuyNeural",
             "jenny": "en-US-JennyNeural",
@@ -138,6 +140,7 @@ LANGUAGES = {
         "cta_text": "Suscríbete al canal →",
         "default_series_primary": "Directo De La Fuente",
         "default_series_fallback": "Resumen Rápido",
+        "preview_text": "Esta es una vista previa de la voz de narración de este canal.",
         "voice_options": {
             "alvaro": "es-ES-AlvaroNeural",
             "elvira": "es-ES-ElviraNeural",

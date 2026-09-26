@@ -16,6 +16,7 @@ from pathlib import Path
 
 from flask import Flask, abort, redirect, render_template_string, request, send_file, url_for
 
+import config
 from pipeline import catalog, channels, notify, orchestrator, reports, youtube_analytics, youtube_upload
 
 app = Flask(__name__)
@@ -847,6 +848,29 @@ def channel_studio(channel_id: int):
 
     status = _generation_status.get(channel_id, "")
 
+    language = channels.language_for(ch)
+    current_voice = channels.narration_voice_for(ch)
+    voice_options_html = "".join(
+        f'<option value="{voice}" {"selected" if voice == current_voice else ""}>{key} ({voice})</option>'
+        for key, voice in language["voice_options"].items()
+    )
+    voice_panel = f"""
+    <div class="panel">
+      <h3 style="margin-top:0;">🎙 Voz da narração</h3>
+      <p class="muted">Escolha e ouça a prévia antes de decidir - muda a voz usada em TODOS os próximos
+      vídeos deste canal (não afeta vídeos já gerados).</p>
+      <form method="post" action="{url_for('update_channel_voice', channel_id=channel_id)}"
+            style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <select name="narration_voice" id="voice-select"
+                onchange="document.getElementById('voice-audio').src = '/voice_preview/' + this.value + '.mp3'">
+          {voice_options_html}
+        </select>
+        <audio id="voice-audio" controls preload="none" src="/voice_preview/{current_voice}.mp3"></audio>
+        <button type="submit" class="secondary">Salvar como voz do canal</button>
+      </form>
+    </div>
+    """
+
     body = f"""
     <p><a href="{url_for('edit_channel', channel_id=channel_id)}">&larr; Voltar pro canal</a></p>
     <h2>🎬 Estúdio de geração - {ch['name']}</h2>
@@ -854,6 +878,8 @@ def channel_studio(channel_id: int):
     <p class="muted">Gera vídeo fora do agendamento diário. Cada um leva alguns minutos (roteiro,
     imagens, narração, dois vídeos montados); itens na fila são processados 1 de cada vez, em segundo
     plano. Tudo cai em "Vídeos gerados" com status "aguardando revisão" - nada é publicado sozinho.</p>
+
+    {voice_panel}
 
     <div class="panel accent">
       <h3 style="margin-top:0;">Tema automático</h3>
@@ -1533,6 +1559,34 @@ def track_file(track_id: int, kind: str):
     if not raw_path or not Path(raw_path).exists():
         abort(404)
     return send_file(Path(raw_path))
+
+
+@app.route("/voice_preview/<voice>.mp3")
+def voice_preview(voice: str):
+    from pipeline import narration
+    # A voz vem embutida no nome do arquivo (ex.: "pt-BR-AntonioNeural") -
+    # acha o idioma correspondente pra usar o texto de prévia certo; cai pro
+    # idioma padrão se por algum motivo a voz não bater com nenhum cadastrado
+    # (não deveria acontecer, já que a lista vem sempre de config.LANGUAGES).
+    language = next(
+        (lang for lang in config.LANGUAGES.values() if voice in lang["voice_options"].values()),
+        config.LANGUAGES[config.DEFAULT_LANGUAGE],
+    )
+    try:
+        path = narration.get_or_build_voice_preview(voice, language["preview_text"])
+    except Exception as exc:
+        abort(502, description=f"Falha ao gerar prévia de voz: {exc}")
+    return send_file(path)
+
+
+@app.route("/channels/<int:channel_id>/voice", methods=["POST"])
+def update_channel_voice(channel_id: int):
+    voice = request.form.get("narration_voice", "").strip()
+    if not voice:
+        abort(400)
+    channels.update_channel(channel_id, narration_voice=voice)
+    _flash(f"Voz de narração do canal atualizada para \"{voice}\".")
+    return redirect(request.referrer or url_for("channel_studio", channel_id=channel_id))
 
 
 def _return_after_action(track_id: int):

@@ -75,3 +75,18 @@ def generate_narration_with_boundaries(text: str, output_path: Path,
                                         voice: str | None = None) -> tuple[Path, list[dict]]:
     boundaries = asyncio.run(_synthesize(text, output_path, voice or config.NARRATION_VOICE))
     return output_path, boundaries
+
+
+PREVIEW_DIR = config.ASSETS_DIR / "voice_previews"
+
+
+def get_or_build_voice_preview(voice: str, text: str) -> Path:
+    """Prévia curta de uma voz específica, gerada uma vez e cacheada em disco
+    (mesma voz = mesmo arquivo sempre) - usada na interface pra ouvir a voz
+    ANTES de escolher, em vez de só ver o nome e ter que gerar um vídeo
+    inteiro pra descobrir como ela soa."""
+    PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    dest = PREVIEW_DIR / f"{voice}.mp3"
+    if not dest.exists():
+        generate_narration(text, dest, voice=voice)
+    return dest
