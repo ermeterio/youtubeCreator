@@ -24,6 +24,7 @@ app = Flask(__name__)
 _authorize_status: dict[int, str] = {}
 _generation_status: dict[int, str] = {}
 _consult_status: dict[int, str] = {}
+_comment_suggestions: dict[str, str] = {}
 
 BASE_TEMPLATE = """
 <!doctype html>
@@ -527,6 +528,7 @@ def edit_channel(channel_id: int):
       <a class="btn" href="{url_for('channel_studio', channel_id=channel_id)}">🎬 Gerar vídeo agora / pedir tema</a>
       <a class="btn secondary" href="{url_for('list_videos', channel_id=channel_id)}">🎥 Vídeos deste canal</a>
       <a class="btn secondary" href="{url_for('weekly_report', channel_id=channel_id)}">📈 Relatório deste canal</a>
+      <a class="btn secondary" href="{url_for('channel_comments', channel_id=channel_id)}">💬 Comentários</a>
     </p>
     """
 
@@ -1092,6 +1094,88 @@ def _format_metric(key: str, value) -> str:
     if isinstance(value, float):
         return f"{value:.1f}"
     return f"{value:,}".replace(",", ".") if isinstance(value, int) else str(value)
+
+
+@app.route("/channels/<int:channel_id>/comments")
+def channel_comments(channel_id: int):
+    ch = channels.get_channel(channel_id)
+    secret_path = channels.client_secret_path(ch["slug"])
+    token_path = channels.token_path(ch["slug"])
+
+    if not token_path.exists():
+        body = f"""
+        <p><a href="{url_for('edit_channel', channel_id=channel_id)}">&larr; Voltar pro canal</a></p>
+        <div class="panel warn">Canal ainda não autorizado no YouTube - autorize antes de ver comentários.</div>
+        """
+        return _render(body)
+
+    try:
+        comments = youtube_upload.list_recent_comments(secret_path, token_path, max_results=30)
+    except Exception as exc:
+        return _render(_scope_error_body(channel_id, exc))
+
+    if not comments:
+        rows_html = '<p class="muted">Nenhum comentário encontrado (ou comentários desativados nos vídeos deste canal).</p>'
+    else:
+        rows_html = ""
+        for c in comments:
+            suggestion = _comment_suggestions.get(c["id"], "")
+            reply_disabled = "" if c["can_reply"] else "disabled"
+            rows_html += f"""
+            <div class="panel" style="margin-bottom:12px;">
+              <p><b>{c['author']}</b> <span class="muted">({c['published_at'][:10]})</span>
+              {f'<span class="badge inactive">{c["reply_count"]} resposta(s)</span>' if c['reply_count'] else ''}</p>
+              <p>{c['text']}</p>
+              <form method="post" action="{url_for('suggest_comment_reply_route', channel_id=channel_id, comment_id=c['id'])}" class="inline">
+                <input type="hidden" name="comment_text" value="{c['text'].replace(chr(34), '&quot;')}">
+                <button type="submit" class="secondary">💬 Sugerir resposta com IA</button>
+              </form>
+              <form method="post" action="{url_for('reply_comment_route', channel_id=channel_id, comment_id=c['id'])}" style="margin-top:8px;">
+                <textarea name="reply_text" rows="2" placeholder="Escreva ou peça uma sugestão acima">{suggestion}</textarea>
+                <button type="submit" {reply_disabled}>Responder no YouTube</button>
+              </form>
+            </div>
+            """
+
+    body = f"""
+    <p><a href="{url_for('edit_channel', channel_id=channel_id)}">&larr; Voltar pro canal</a></p>
+    <h2>💬 Comentários - {ch['name']}</h2>
+    <p class="muted">Comentários recentes de qualquer vídeo do canal. A sugestão de resposta é gerada
+    pelo Llama local, mas nada é publicado sem você revisar/editar o texto e clicar em "Responder".</p>
+    {rows_html}
+    """
+    return _render(body)
+
+
+@app.route("/channels/<int:channel_id>/comments/<comment_id>/suggest", methods=["POST"])
+def suggest_comment_reply_route(channel_id: int, comment_id: str):
+    from pipeline import script_gen
+    ch = channels.get_channel(channel_id)
+    comment_text = request.form.get("comment_text", "")
+    language = channels.language_for(ch)
+    suggestion = script_gen.suggest_comment_reply(comment_text, ch["niche"] or "ciência", language["llm_language_name"])
+    _comment_suggestions[comment_id] = suggestion or ""
+    if not suggestion:
+        _flash("O Llama não respondeu - escreva a resposta na mão.")
+    return redirect(url_for("channel_comments", channel_id=channel_id))
+
+
+@app.route("/channels/<int:channel_id>/comments/<comment_id>/reply", methods=["POST"])
+def reply_comment_route(channel_id: int, comment_id: str):
+    ch = channels.get_channel(channel_id)
+    text = request.form.get("reply_text", "").strip()
+    if not text:
+        _flash("Escreva algo antes de responder.")
+        return redirect(url_for("channel_comments", channel_id=channel_id))
+    try:
+        youtube_upload.reply_to_comment(
+            comment_id, text, channels.client_secret_path(ch["slug"]), channels.token_path(ch["slug"])
+        )
+        _comment_suggestions.pop(comment_id, None)
+        _flash("Resposta publicada no YouTube.")
+    except Exception as exc:
+        _flash(f"Falha ao publicar resposta: {exc}")
+    return redirect(url_for("channel_comments", channel_id=channel_id))
 
 
 @app.route("/channels/<int:channel_id>/dashboard")

@@ -224,14 +224,13 @@ def authorize_and_identify(client_secret_path: Path, token_path: Path, force_new
     }
 
 
-def list_recent_comments(client_secret_path: Path, token_path: Path, max_results: int = 50) -> list[str]:
-    """Comentários recentes de QUALQUER vídeo do canal - usado como sinal de
-    pauta real (o que o público está perguntando/pedindo), não só tema
-    inventado pelo LLM. Só o texto do comentário top-level interessa aqui
-    (não respostas), então usa commentThreads.list em vez de comments.list.
-    Falha graciosamente (lista vazia) se comentários estiverem desativados
-    ou a API negar - isso é só um insumo extra pro gerador de temas, nunca
-    pode travar o fluxo principal."""
+def list_recent_comments(client_secret_path: Path, token_path: Path, max_results: int = 50) -> list[dict]:
+    """Comentários recentes de QUALQUER vídeo do canal - usado tanto como
+    sinal de pauta real (o que o público pergunta/pede) quanto pra
+    moderação/resposta (ver reply_to_comment). Só o texto do comentário
+    top-level interessa aqui (não respostas), então usa commentThreads.list
+    em vez de comments.list. Falha graciosamente (lista vazia) se
+    comentários estiverem desativados ou a API negar."""
     creds = _get_credentials(client_secret_path, token_path)
     youtube = build("youtube", "v3", credentials=creds)
     channel_response = youtube.channels().list(part="id", mine=True).execute()
@@ -253,10 +252,36 @@ def list_recent_comments(client_secret_path: Path, token_path: Path, max_results
 
     comments = []
     for item in response.get("items", []):
-        text = item["snippet"]["topLevelComment"]["snippet"].get("textDisplay", "").strip()
-        if text:
-            comments.append(text)
+        top = item["snippet"]["topLevelComment"]
+        text = top["snippet"].get("textDisplay", "").strip()
+        if not text:
+            continue
+        comments.append({
+            "id": top["id"],
+            "thread_id": item["id"],
+            "text": text,
+            "author": top["snippet"].get("authorDisplayName", ""),
+            "video_id": item["snippet"].get("videoId", ""),
+            "published_at": top["snippet"].get("publishedAt", ""),
+            "reply_count": item["snippet"].get("totalReplyCount", 0),
+            "can_reply": item["snippet"].get("canReply", True),
+        })
     return comments
+
+
+def reply_to_comment(comment_id: str, text: str, client_secret_path: Path, token_path: Path) -> dict:
+    """Publica uma resposta a um comentário existente (parentId = o
+    comentário top-level) - sempre com o texto revisado/editado pelo dono
+    antes de enviar (ver settings_ui), nunca automático. É essa revisão
+    humana que evita o risco de uma sugestão do LLM sair errada/estranha
+    direto no canal público."""
+    creds = _get_credentials(client_secret_path, token_path)
+    youtube = build("youtube", "v3", credentials=creds)
+    response = youtube.comments().insert(
+        part="snippet",
+        body={"snippet": {"parentId": comment_id, "textOriginal": text}},
+    ).execute()
+    return response
 
 
 def delete_video(video_id: str, client_secret_path: Path, token_path: Path) -> None:

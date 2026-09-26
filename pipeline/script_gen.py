@@ -127,6 +127,36 @@ RISCOS: <lista curta de trechos problemáticos com motivo, ou "nenhum - roteiro 
 """
 
 
+COMMENT_REPLY_TEMPLATE = """Você é quem administra um canal de YouTube automatizado sobre {niche},
+respondendo comentários do público de forma simpática, breve e humana (não robótica, não genérica).
+
+COMENTÁRIO DO ESPECTADOR:
+---
+{comment}
+---
+
+Escreva UMA resposta curta (1-3 frases) em {language_name}, num tom acolhedor e específico ao que a
+pessoa disse (evite respostas genéricas tipo "obrigado pelo comentário!" sem relação com o conteúdo).
+Se for uma pergunta, tente respondê-la com o conhecimento geral que você tem sobre {niche}; se for
+elogio, agradeça de forma específica; se for crítica construtiva, reconheça sem ser defensivo.
+
+Responda EXATAMENTE neste formato, sem texto antes ou depois:
+RESPOSTA: <a resposta sugerida>
+"""
+
+
+def suggest_comment_reply(comment_text: str, niche: str = "ciência", language_name: str = "português do Brasil") -> str | None:
+    """Sugere uma resposta a UM comentário real do canal - sempre revisada e
+    editável pelo dono antes de publicar (ver settings_ui rota de
+    comentários). Retorna None se o Ollama não responder; nesse caso a
+    interface mostra um campo de texto vazio pro dono escrever na mão."""
+    prompt = COMMENT_REPLY_TEMPLATE.format(comment=comment_text, niche=niche, language_name=language_name)
+    text = _call_ollama(prompt, timeout=60)
+    if not text or not _has_marker(text, "RESPOSTA:"):
+        return None
+    return _split_at_marker(text, "RESPOSTA:")[1].strip()
+
+
 def clarity_review(script: str, niche: str = "ciência") -> str | None:
     """Segunda passada do LLM local simulando um espectador leigo lendo o
     roteiro antes da revisão humana - sinaliza trechos confusos ou
@@ -512,7 +542,7 @@ def _recent_comments_section(channel: sqlite3.Row, limit: int = 25) -> str:
         comments = youtube_upload.list_recent_comments(secret_path, token_path, max_results=limit)
         if not comments:
             return ""
-        sample = "\n".join(f"- {c[:180]}" for c in comments[:limit])
+        sample = "\n".join(f"- {c['text'][:180]}" for c in comments[:limit])
         return f"\nCOMENTÁRIOS/PERGUNTAS REAIS RECENTES DO PÚBLICO NO CANAL:\n{sample}\n"
     except Exception:
         return ""
