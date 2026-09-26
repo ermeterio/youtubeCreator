@@ -11,6 +11,7 @@ editar código/JSON na mão.
 """
 
 import json
+import re
 import threading
 from pathlib import Path
 
@@ -156,9 +157,11 @@ BASE_TEMPLATE = """
 <body>
 <h1>YouTube Content Creator</h1>
 <nav>
-  <a href="/" class="{{ 'active' if active_nav == 'channels' else '' }}">Canais e credenciais</a>
-  <a href="/videos" class="{{ 'active' if active_nav == 'videos' else '' }}">Vídeos{{ ' (' + pending_count|string + ' p/ publicar no YouTube)' if pending_count else '' }}</a>
-  <a href="/reports" class="{{ 'active' if active_nav == 'reports' else '' }}">📈 Relatório por série</a>
+  <a href="/" class="{{ 'active' if active_nav == 'home' else '' }}">🏠 Início</a>
+  <a href="/channels" class="{{ 'active' if active_nav == 'channels' else '' }}">📁 Canais</a>
+  <a href="/videos" class="{{ 'active' if active_nav == 'videos' else '' }}">📝 Rascunhos{{ ' (' + pending_count|string + ' aguardando sua decisão)' if pending_count else '' }}</a>
+  <a href="/youtube" class="{{ 'active' if active_nav == 'youtube' else '' }}">▶️ No YouTube</a>
+  <a href="/reports" class="{{ 'active' if active_nav == 'reports' else '' }}">📈 Desempenho</a>
 </nav>
 {% with messages = get_flashed() %}
   {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
@@ -225,6 +228,93 @@ def _connected_channel_cell(channel) -> str:
 
 
 @app.route("/")
+def home():
+    """Painel de "o que precisa da sua atenção agora", cross-canal - antes
+    disso a única "home" era a lista de canais (painel de config/saúde de
+    credencial, não de trabalho pendente). Relatado como causa de "não
+    consigo enxergar as novas features" e de precisar abrir canal por canal
+    pra saber se há algo a fazer. Todo item aqui degrada graciosamente
+    (nunca trava a tela se uma chamada de API falhar)."""
+    catalog.init_db()
+    channels.ensure_default_channel()
+    channel_map = {ch["id"]: ch for ch in channels.list_channels()}
+
+    # 1. Rascunhos aguardando revisão, por canal
+    pending = [t for t in catalog.list_tracks(limit=500) if t["status"] == "pending_review"]
+    by_channel: dict[int, int] = {}
+    for t in pending:
+        by_channel[t["channel_id"]] = by_channel.get(t["channel_id"], 0) + 1
+    pending_lines = "".join(
+        f"<li>{channel_map[cid]['name'] if cid in channel_map else '?'}: <b>{n}</b> "
+        f'<a href="{url_for("list_videos", channel_id=cid)}">ver</a></li>'
+        for cid, n in by_channel.items()
+    )
+    pending_card = f"""
+    <div class="panel {'accent' if pending else ''}">
+      <h3 style="margin-top:0;">📝 Rascunhos aguardando revisão {f'({len(pending)})' if pending else ''}</h3>
+      {'<ul>' + pending_lines + '</ul>' if pending else '<p class="muted">Nenhum no momento.</p>'}
+      {f'<a class="btn" href="{url_for("batch_review")}">⚡ Revisar agora</a>' if pending else ''}
+    </div>
+    """
+
+    # 2. Gerações com falha (fila)
+    failed = [q for q in catalog.list_queue_items(limit=100) if q["status"] == "failed"]
+    failed_lines = "".join(
+        f"<li>{channel_map[q['channel_id']]['name'] if q['channel_id'] in channel_map else '?'}: "
+        f"\"{q['topic_label']}\" - <span class=\"muted\">{(q['error'] or '')[:100]}</span></li>"
+        for q in failed[:10]
+    )
+    failed_card = f"""
+    <div class="panel {'warn' if failed else ''}">
+      <h3 style="margin-top:0;">⚠️ Gerações com falha {f'({len(failed)})' if failed else ''}</h3>
+      {'<ul>' + failed_lines + '</ul>' if failed else '<p class="muted">Nenhuma no momento.</p>'}
+    </div>
+    """
+
+    # 3. Comentários recentes / possível spam, cross-canal (best-effort - só
+    # canais já autorizados, nunca trava a home se a API falhar num deles)
+    comment_lines = []
+    total_comments, total_spam = 0, 0
+    for ch in channel_map.values():
+        token_path = channels.token_path(ch["slug"])
+        if not token_path.exists():
+            continue
+        try:
+            comments = youtube_upload.list_recent_comments(
+                channels.client_secret_path(ch["slug"]), token_path, max_results=15
+            )
+            spam_count = sum(1 for c in comments if spam_detection.spam_score(c["text"], c["author"])[0] >= 40)
+            total_comments += len(comments)
+            total_spam += spam_count
+            if comments:
+                comment_lines.append(
+                    f"<li>{ch['name']}: {len(comments)} recente(s)"
+                    f"{f', <b>{spam_count} possível spam</b>' if spam_count else ''} "
+                    f'<a href="{url_for("channel_comments", channel_id=ch["id"])}">ver</a></li>'
+                )
+        except Exception:
+            continue
+    comments_card = f"""
+    <div class="panel {'warn' if total_spam else ''}">
+      <h3 style="margin-top:0;">💬 Comentários {f'({total_comments}, {total_spam} possível spam)' if total_comments else ''}</h3>
+      {'<ul>' + ''.join(comment_lines) + '</ul>' if comment_lines else '<p class="muted">Nada novo, ou nenhum canal autorizado ainda.</p>'}
+    </div>
+    """
+
+    body = f"""
+    <h2>🏠 Início</h2>
+    <p class="muted">O que precisa da sua atenção agora, em todos os canais.</p>
+    <div class="cols">
+      {pending_card}
+      {failed_card}
+      {comments_card}
+    </div>
+    <p style="margin-top:20px;"><a class="btn secondary" href="{url_for('index')}">📁 Ver todos os canais</a></p>
+    """
+    return _render(body, active_nav="home")
+
+
+@app.route("/channels")
 def index():
     catalog.init_db()
     channels.ensure_default_channel()
@@ -249,28 +339,32 @@ def index():
           <td>{_channel_status_badges(ch)}</td>
           <td>
             <a class="btn secondary" href="{url_for('channel_studio', channel_id=ch['id'])}">🎬 Estúdio</a>
-            <a class="btn secondary" href="{url_for('list_videos', channel_id=ch['id'])}">🎥 Vídeos</a>
-            <a class="btn secondary" href="{url_for('weekly_report', channel_id=ch['id'])}">📈 Relatório</a>
+            <a class="btn secondary" href="{url_for('list_videos', channel_id=ch['id'])}">📝 Rascunhos</a>
+            <a class="btn secondary" href="{url_for('youtube_channel_videos', channel_id=ch['id'])}">▶️ No YouTube</a>
+            <a class="btn secondary" href="{url_for('weekly_report', channel_id=ch['id'])}">📈 Desempenho</a>
           </td>
         </tr>
         """
 
     shared_key = channels.shared_nasa_api_key() or ""
     settings_panel = f"""
-    <div class="panel accent">
-      <h3 style="margin-top:0;">Chave da NASA API (compartilhada)</h3>
-      <p class="muted">Uma chave só, usada por TODOS os canais - inclusive os que você ainda vai
-      criar. Cadastre gratuitamente em <a href="https://api.nasa.gov/" target="_blank">api.nasa.gov</a>.
-      Sem isso, todos os canais caem no DEMO_KEY (limite baixo, compartilhado com o mundo inteiro,
-      não recomendado pra produção diária).</p>
-      <form method="post" action="{url_for('save_shared_nasa_key')}">
-        <input type="text" name="shared_nasa_api_key" value="{shared_key}" placeholder="sua chave gratuita de api.nasa.gov">
-        <button type="submit">Salvar chave compartilhada</button>
-      </form>
-    </div>
+    <details style="margin-top:24px;">
+      <summary style="cursor:pointer; color:var(--text-muted);">⚙️ Configuração compartilhada (chave da NASA API)</summary>
+      <div class="panel" style="margin-top:10px;">
+        <p class="muted">Uma chave só, usada por TODOS os canais - inclusive os que você ainda vai
+        criar. Cadastre gratuitamente em <a href="https://api.nasa.gov/" target="_blank">api.nasa.gov</a>.
+        Sem isso, todos os canais caem no DEMO_KEY (limite baixo, compartilhado com o mundo inteiro,
+        não recomendado pra produção diária).</p>
+        <form method="post" action="{url_for('save_shared_nasa_key')}">
+          <input type="text" name="shared_nasa_api_key" value="{shared_key}" placeholder="sua chave gratuita de api.nasa.gov">
+          <button type="submit">Salvar chave compartilhada</button>
+        </form>
+      </div>
+    </details>
     """
 
-    body = settings_panel + f"""
+    body = f"""
+    <h2>📁 Canais</h2>
     <p>
       <a class="btn" href="{url_for('new_channel')}">+ Novo canal</a>
       <a class="btn secondary" href="{url_for('run_health_check')}">🩺 Checar saúde dos canais agora</a>
@@ -279,8 +373,9 @@ def index():
       <tr><th>Canal</th><th>Conectado a (YouTube)</th><th>Status</th><th></th></tr>
       {items or '<tr><td colspan="4">Nenhum canal cadastrado ainda.</td></tr>'}
     </table>
+    {settings_panel}
     """
-    return _render(body)
+    return _render(body, active_nav="channels")
 
 
 @app.route("/health_check")
@@ -497,10 +592,10 @@ CREDENTIALS_FORM = """
   <button type="submit" class="secondary" {{ 'disabled' if not has_secret else '' }}>
     {{ 'Reautorizar' if ch.connected_youtube_channel_title else 'Autorizar no YouTube (abre o navegador)' }}
   </button>
-  <a class="btn secondary" href="{{ url_for('youtube_channel_videos', channel_id=ch.id) }}">Ver vídeos reais do canal no YouTube</a>
-  <a class="btn secondary" href="{{ url_for('channel_dashboard', channel_id=ch.id) }}">📊 Painel de métricas</a>
 </form>
 <p class="muted">{{ authorize_status }}</p>
+<p class="muted">Vídeos publicados, comentários e métricas ficam nos botões no topo desta página,
+não aqui embaixo - esta seção é só sobre a CONEXÃO OAuth em si.</p>
 """
 
 
@@ -526,9 +621,10 @@ def edit_channel(channel_id: int):
     studio_cta = f"""
     <p>
       <a class="btn" href="{url_for('channel_studio', channel_id=channel_id)}">🎬 Gerar vídeo agora / pedir tema</a>
-      <a class="btn secondary" href="{url_for('list_videos', channel_id=channel_id)}">🎥 Vídeos deste canal</a>
-      <a class="btn secondary" href="{url_for('weekly_report', channel_id=channel_id)}">📈 Relatório deste canal</a>
+      <a class="btn secondary" href="{url_for('list_videos', channel_id=channel_id)}">📝 Rascunhos deste canal</a>
+      <a class="btn secondary" href="{url_for('youtube_channel_videos', channel_id=channel_id)}">▶️ Vídeos publicados no YouTube</a>
       <a class="btn secondary" href="{url_for('channel_comments', channel_id=channel_id)}">💬 Comentários</a>
+      <a class="btn secondary" href="{url_for('weekly_report', channel_id=channel_id)}">📈 Desempenho deste canal</a>
     </p>
     """
 
@@ -565,7 +661,7 @@ def edit_channel(channel_id: int):
     <div class="panel warn">
       <h3 style="margin-top:0; color: var(--missing-fg);">Excluir canal</h3>
       <p class="muted">Remove o canal do YouTube Content Creator (configuração + arquivos locais). Vídeos já
-      publicados no YouTube NÃO são apagados por isso - exclua-os pela aba "Vídeos gerados" ou
+      publicados no YouTube NÃO são apagados por isso - exclua-os em "▶️ No YouTube" ou
       diretamente no YouTube, se quiser, antes de excluir o canal aqui.</p>
       <form method="post" action="{url_for('delete_channel_route', channel_id=channel_id)}"
             onsubmit="return confirm('Excluir o canal \\'{ch['name']}\\' do YouTube Content Creator? Isso apaga a configuração e os arquivos locais (vídeos/áudio/credenciais salvas aqui). Vídeos já publicados no YouTube continuam lá. Essa ação não pode ser desfeita.');">
@@ -778,17 +874,19 @@ def channel_studio(channel_id: int):
     tab_nav = f"""
     <nav style="margin-bottom:1.5rem;">
       <a href="{url_for('channel_studio', channel_id=channel_id, tab='studio')}" class="{'active' if tab == 'studio' else ''}">🎬 Estúdio</a>
-      <a href="{url_for('channel_studio', channel_id=channel_id, tab='videos')}" class="{'active' if tab == 'videos' else ''}">🎥 Vídeos gerados</a>
+      <a href="{url_for('channel_studio', channel_id=channel_id, tab='videos')}" class="{'active' if tab == 'videos' else ''}">📝 Rascunhos</a>
     </nav>
     """
 
     if tab == "videos":
         body = f"""
         <p><a href="{url_for('edit_channel', channel_id=channel_id)}">&larr; Voltar pro canal</a></p>
-        <h2>🎥 Vídeos gerados - {ch['name']}</h2>
+        <h2>📝 Rascunhos - {ch['name']}</h2>
         {tab_nav}
         <p class="muted">Clique numa miniatura pra assistir e decidir se aprova a postagem, sem sair
-        desta página.</p>
+        desta página. Isto é o mesmo conteúdo de <a href="{url_for('list_videos', channel_id=channel_id)}">
+        Rascunhos (visão em lista/tabela, com revisão em lote)</a> filtrado só por este canal - use a
+        que preferir. Pra ver o que já está DE VERDADE no ar, use "▶️ No YouTube" no menu.</p>
         {_video_grid_html(channel_id)}
         """
         return _render(body, active_nav="videos")
@@ -892,7 +990,7 @@ def channel_studio(channel_id: int):
     {tab_nav}
     <p class="muted">Gera vídeo fora do agendamento diário. Cada um leva alguns minutos (roteiro,
     imagens, narração, dois vídeos montados); itens na fila são processados 1 de cada vez, em segundo
-    plano. Tudo cai em "Vídeos gerados" com status "aguardando revisão" - nada é publicado sozinho.</p>
+    plano. Tudo cai em "📝 Rascunhos" com status "aguardando revisão" - nada é publicado sozinho.</p>
 
     {best_day_note}
     {voice_panel}
@@ -985,7 +1083,7 @@ def _run_generation(channel_id: int, forced_topic: tuple[str, str] | None) -> No
         channel_name = channel["name"]
         _generation_status[channel_id] = "Gerando... (roteiro, imagens, narração e dois vídeos - alguns minutos)"
         track_id = orchestrator.prepare_daily_video(channel_id, forced_topic=forced_topic)
-        _generation_status[channel_id] = f"Pronto! Track {track_id} está em 'Vídeos gerados', aguardando sua revisão."
+        _generation_status[channel_id] = f"Pronto! Track {track_id} está em 'Rascunhos', aguardando sua revisão."
         notify.notify_result(True, f"[{channel_name}] Vídeo sob demanda pronto (track {track_id}).")
     except Exception as exc:
         _generation_status[channel_id] = f"Falhou: {exc}"
@@ -1028,6 +1126,51 @@ def _scope_error_body(channel_id: int, exc: Exception) -> str:
       </form>
     </div>
     """
+
+
+@app.route("/youtube")
+def youtube_hub():
+    """Porta de entrada de 1º nível pra tudo que reflete a realidade DE
+    VERDADE no YouTube (vídeos publicados + comentários) - antes disso só
+    existia um jeito de chegar aqui: entrar em "editar canal" e rolar até
+    achar o botão, no meio do bloco de configuração de OAuth. Relatado como
+    causa direta de "não encontro os vídeos que estão no YouTube"."""
+    rows = channels.list_channels()
+    cards = ""
+    for ch in rows:
+        connected = channels.token_path(ch["slug"]).exists()
+        if not connected:
+            cards += f"""
+            <div class="panel" style="margin-bottom:12px;">
+              <b>{ch['name']}</b> <span class="badge missing">não autorizado ainda</span>
+              <p class="muted">Autorize esse canal no YouTube pra ver os vídeos publicados e os comentários.
+              <a href="{url_for('edit_channel', channel_id=ch['id'])}">Ir pra configuração &rarr;</a></p>
+            </div>
+            """
+            continue
+        thumb = (
+            f'<img src="{ch["connected_youtube_channel_thumbnail"]}" style="width:32px; height:32px; border-radius:50%; vertical-align:middle; margin-right:8px;">'
+            if ch["connected_youtube_channel_thumbnail"] else ""
+        )
+        cards += f"""
+        <div class="panel" style="margin-bottom:12px;">
+          <p>{thumb}<b>{ch['connected_youtube_channel_title'] or ch['name']}</b>
+          <span class="badge inactive">canal: {ch['name']}</span></p>
+          <p>
+            <a class="btn" href="{url_for('youtube_channel_videos', channel_id=ch['id'])}">▶️ Vídeos publicados</a>
+            <a class="btn secondary" href="{url_for('channel_comments', channel_id=ch['id'])}">💬 Comentários</a>
+            <a class="btn secondary" href="{url_for('channel_dashboard', channel_id=ch['id'])}">📊 Métricas</a>
+          </p>
+        </div>
+        """
+
+    body = f"""
+    <h2>▶️ No YouTube</h2>
+    <p class="muted">O que está DE VERDADE publicado nos seus canais - dados vindos direto da API do
+    YouTube, não do banco local do pipeline. Escolha um canal:</p>
+    {cards or '<p class="muted">Nenhum canal cadastrado ainda.</p>'}
+    """
+    return _render(body, active_nav="youtube")
 
 
 @app.route("/channels/<int:channel_id>/youtube_videos")
@@ -1362,6 +1505,38 @@ def _quality_badge(track) -> str:
     return f'<span class="badge {cls}"{title_attr}>⭐ qualidade {score}/100</span>'
 
 
+def _quality_badges_inline(track) -> str:
+    """Versão sempre visível dos 4 sub-scores que compõem o "⭐ qualidade
+    X/100" - antes só apareciam num tooltip de hover (invisível em toque/
+    mobile, fácil de nunca notar). Relatado como decisão crítica sub-
+    exposta - um revisor decide mais rápido vendo os 4 sinais lado a lado."""
+    breakdown = track["quality_breakdown"] if "quality_breakdown" in track.keys() else None
+    score = track["quality_score"] if "quality_score" in track.keys() else None
+    if not breakdown or score is None:
+        return ""
+
+    pills = ""
+    for part in breakdown.split(" | "):
+        if ":" not in part:
+            continue
+        label, rest = part.split(":", 1)
+        m = re.search(r"(\d+)/(\d+)", rest)
+        cls = "inactive"
+        if m:
+            got, total = int(m.group(1)), int(m.group(2))
+            ratio = got / total if total else 0
+            cls = "ok" if ratio >= 0.75 else ("missing" if ratio >= 0.4 else "inactive")
+        pills += f'<span class="badge {cls}" title="{rest.strip()}">{label.strip()}: {rest.strip()}</span> '
+
+    overall_cls = "ok" if score >= 75 else ("missing" if score >= 50 else "inactive")
+    return f"""
+    <div class="panel" style="margin:12px 0;">
+      <b>⭐ Qualidade estimada: <span class="badge {overall_cls}">{score}/100</span></b>
+      <div style="margin-top:8px;">{pills}</div>
+    </div>
+    """
+
+
 def _privacy_select(field_id: str = "privacy_status") -> str:
     # "Visibilidade" (não "privacidade") - termo que o YouTube Studio usa pra
     # essa mesma opção, pra quem já usa o YouTube reconhecer de cara.
@@ -1405,14 +1580,13 @@ def list_videos():
         f'<a class="btn" href="{url_for("batch_review")}">⚡ Revisão em lote ({pending_count} aguardando)</a>'
         if pending_count else ""
     )
-    studio_links = " ".join(
-        f'<a class="btn secondary" href="{url_for("channel_studio", channel_id=c["id"])}">🎬 Gerar vídeo - {c["name"]}</a>'
-        for c in channels.list_channels(active_only=True)
-    )
 
     body = f"""
-    <h2>Vídeos gerados</h2>
-    <p>{batch_cta} {studio_links}</p>
+    <h2>📝 Rascunhos</h2>
+    <p class="muted">Vídeos gerados pelo pipeline, aguardando sua decisão de aprovar/rejeitar. Isto NÃO
+    é o inventário do seu canal no YouTube - pra ver o que já está publicado de verdade, use
+    "▶️ No YouTube" no menu acima.</p>
+    <p>{batch_cta}</p>
     <form method="get" style="margin-bottom: 1rem;">
       <label style="display:inline;">Filtrar por canal:</label>
       <select name="channel_id" onchange="this.form.submit()" style="width:auto; display:inline; margin-left:8px;">
@@ -1630,17 +1804,17 @@ def video_detail(track_id: int):
     """
 
     body = f"""
-    <p><a href="{url_for('list_videos')}">&larr; Voltar para a lista</a></p>
+    <p><a href="{url_for('list_videos')}">&larr; Voltar para os rascunhos</a></p>
     <h2>{track['title']}</h2>
-    <p>{_status_badge(track['status'])} {_fact_check_badge(track['fact_check_flag'])} {_quality_badge(track)} {feedback_badge} {ab_badge}
+    <p>{_status_badge(track['status'])} {_fact_check_badge(track['fact_check_flag'])} {feedback_badge} {ab_badge}
        <span class="badge inactive">canal: {channel['name']}</span>
        {f'<span class="badge inactive">série: {track["series"]}</span>' if track['series'] else ''}
     </p>
+    {_quality_badges_inline(track)}
     {fact_check_note}
     {clarity_note}
     {youtube_link}
     {metrics_panel}
-    {actions}
 
     <div class="cols">
       <div>
@@ -1663,6 +1837,12 @@ def video_detail(track_id: int):
 
     <h3>Tags a serem usadas</h3>
     <div class="script-box">{tags_preview}</div>
+
+    <div class="panel accent">
+      <h3 style="margin-top:0;">Decisão</h3>
+      <p class="muted">Já assistiu e leu o roteiro? Decida abaixo.</p>
+      {actions or '<p class="muted">Este vídeo já foi decidido (aprovado/rejeitado/publicado).</p>'}
+    </div>
 
     <h3>Sua avaliação</h3>
     <p class="muted">Assista ao vídeo e leia o roteiro acima, depois avalie. 👍/👎 não publica nem
@@ -1687,7 +1867,10 @@ def video_detail(track_id: int):
       </button>
     </form>
 
-    {delete_section}
+    <details style="margin-top:24px;">
+      <summary style="cursor:pointer; color:var(--missing-fg);">⚠️ Zona de exclusão (irreversível)</summary>
+      {delete_section}
+    </details>
     """
     return _render(body, active_nav="videos")
 
@@ -1761,7 +1944,10 @@ def approve_video(track_id: int):
         track = catalog.get_track(track_id)
         video_id = orchestrator.approve_and_upload(track_id, privacy_status=privacy_status)
         catalog.log_approval_decision(track_id, track["channel_id"], "approved_video", track["quality_score"])
-        _flash(f"Vídeo publicado ({_PRIVACY_LABELS[privacy_status]}): https://youtube.com/watch?v={video_id}")
+        _flash(
+            f"Vídeo publicado ({_PRIVACY_LABELS[privacy_status]}): https://youtube.com/watch?v={video_id} "
+            f"— pode levar alguns minutos pra aparecer no canal; confira em '▶️ No YouTube' no menu."
+        )
     except Exception as exc:
         _flash(f"Falha ao publicar o vídeo: {exc}")
     return _return_after_action(track_id)
@@ -1774,7 +1960,10 @@ def approve_short(track_id: int):
         track = catalog.get_track(track_id)
         video_id = orchestrator.approve_and_upload_short(track_id, privacy_status=privacy_status)
         catalog.log_approval_decision(track_id, track["channel_id"], "approved_short", track["quality_score"])
-        _flash(f"Short publicado ({_PRIVACY_LABELS[privacy_status]}): https://youtube.com/shorts/{video_id}")
+        _flash(
+            f"Short publicado ({_PRIVACY_LABELS[privacy_status]}): https://youtube.com/shorts/{video_id} "
+            f"— pode levar alguns minutos pra aparecer no canal; confira em '▶️ No YouTube' no menu."
+        )
     except Exception as exc:
         _flash(f"Falha ao publicar o Short: {exc}")
     return _return_after_action(track_id)
