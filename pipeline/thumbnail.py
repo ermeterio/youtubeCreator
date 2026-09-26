@@ -78,5 +78,10 @@ def build_thumbnail(main_asset: VisualAsset, title: str, output_path: Path,
               font=credit_font, fill=(255, 255, 255))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    base.convert("RGB").save(output_path, "JPEG", quality=90)
+    # Mesmo padrão de escrita atômica do video_build.py: escreve num arquivo
+    # temporário e só troca pro nome final depois de salvar com sucesso, pra
+    # orchestrator.py nunca achar um ".exists()" de um arquivo truncado.
+    tmp_path = output_path.with_suffix(output_path.suffix + ".partial")
+    base.convert("RGB").save(tmp_path, "JPEG", quality=90)
+    tmp_path.replace(output_path)
     return output_path
