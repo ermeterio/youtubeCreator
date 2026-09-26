@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import config
-from pipeline import audio_post, backup, catalog, channels, narration, notify, script_gen, thumbnail, video_build, visual_source, youtube_upload
+from pipeline import audio_post, backup, catalog, channels, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
 
 # Status em que o track já passou por roteiro+imagens+narração (a parte cara:
 # chamadas ao Ollama, busca de imagem, TTS) mas ainda não terminou a
@@ -134,11 +134,15 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         except Exception:
             pass
 
-        # Score agregado (fatos + clareza + relevância real das imagens) -
-        # resumo rápido pro revisor, calculado uma vez após os outros dois
-        # sinais estarem prontos. Não bloqueia se falhar por qualquer motivo.
+        # Score agregado (fatos + clareza + relevância de imagem + diversidade
+        # vs vídeos recentes do canal) - resumo rápido pro revisor, calculado
+        # após os outros sinais estarem prontos. Não bloqueia se falhar.
         try:
-            score, breakdown = script_gen.compute_quality_score(fact_check, clarity, assets, topic)
+            recent_titles = [t for t in catalog.recent_titles(channel["id"], limit=20) if t != title]
+            repetition_score = semantic.max_similarity(title, recent_titles)
+            score, breakdown = script_gen.compute_quality_score(
+                fact_check, clarity, assets, topic, repetition_score=repetition_score
+            )
             catalog.update_track(track_id, quality_score=score, quality_breakdown=breakdown)
         except Exception:
             pass

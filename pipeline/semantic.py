@@ -62,6 +62,31 @@ def average_relevance(query: str, candidates: list, text_fn=lambda c: c.title) -
     return sum(scores) / len(scores)
 
 
+# Calibrado empiricamente comparando título/gancho reais do canal: paráfrase
+# do mesmo tema (repetição de verdade) ficou em ~0.92; títulos de temas
+# genuinamente diferentes do mesmo canal ficaram em ~0.64-0.75. 0.85 separa
+# bem os dois casos sem marcar vídeos só por serem do mesmo nicho.
+REPETITION_THRESHOLD = 0.85
+
+
+def max_similarity(text: str, recent_texts: list[str]) -> float | None:
+    """Maior similaridade entre `text` e qualquer item de `recent_texts` -
+    usado pra detectar se um vídeo novo está repetindo o título/gancho de um
+    vídeo recente demais do mesmo canal (o YouTube penaliza reciclagem de
+    hook/formato - ver ROADMAP.md). Retorna None se não houver textos
+    recentes pra comparar ou o modelo não carregar."""
+    if not recent_texts:
+        return None
+    try:
+        model = _get_model()
+        vectors = list(model.embed([text] + recent_texts))
+    except Exception:
+        return None
+
+    query_vec = vectors[0]
+    return max(_cosine(query_vec, vec) for vec in vectors[1:])
+
+
 def filter_relevant(query: str, candidates: list, text_fn=lambda c: c.title,
                      min_score: float = MIN_RELEVANCE_SCORE) -> list:
     """Filtra `candidates` mantendo só os semanticamente relacionados a

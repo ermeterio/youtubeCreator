@@ -196,6 +196,19 @@ def feedback_examples(channel_id: int, feedback: str, limit: int = 5) -> list[sq
         ).fetchall()
 
 
+def recent_titles(channel_id: int, limit: int = 20) -> list[str]:
+    """Títulos gerados recentemente NESSE canal - usado pra detectar
+    repetição de hook/estilo (ver script_gen.compute_quality_score), não só
+    de tema bruto (isso já existe em recent_topics). Título carrega o gancho
+    de verdade, tema bruto às vezes é só uma palavra-chave interna."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT title FROM tracks WHERE channel_id = ? ORDER BY id DESC LIMIT ?",
+            (channel_id, limit),
+        )
+        return [row["title"] for row in cur.fetchall()]
+
+
 def recent_topics(channel_id: int, lookback: int = 10) -> set[str]:
     """Temas usados recentemente NESSE canal - usado pra evitar repetição
     perceptível quando o pipeline roda por meses seguidos (ver

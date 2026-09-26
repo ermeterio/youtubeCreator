@@ -58,6 +58,14 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       relevância média de imagem num badge único (0-100) visível no grid, modal e página do vídeo.
       Track 23 (validação) tirou 70/100 - detalhamento: fatos 35/35 (ok), clareza 15/35 (revisão
       apontou trecho redundante), imagens 20/30 (relevância média 0.67).
+- [x] **Checador de repetição de hook/título** — DONE (26/09/2026), pesquisa de mercado confirmou que
+      o YouTube passou a penalizar reciclagem de hook/formato entre uploads do mesmo canal em 2026.
+      Reaproveita o fastembed já integrado: compara título/gancho do vídeo novo contra os últimos 20
+      títulos do canal (`semantic.max_similarity`, threshold 0.85 calibrado com pares reais). Vira o
+      4º componente do score de qualidade ("Diversidade", pesos rebalanceados pra fatos 30/clareza
+      30/imagens 25/diversidade 15 = 100). Validado com um par real já existente no histórico do canal
+      (dois títulos sobre "velocidade da luz" de gerações repetidas) - similaridade 0.853, corretamente
+      no limite de detecção.
 - [ ] **Inverter ordem: confirmar imagem disponível antes de narrar aquele trecho** — DEFERIDO
       deliberadamente: é uma mudança arquitetural grande (reescreve a ordem roteiro→imagem→narração)
       com risco real de quebrar o pipeline inteiro se malfeita sem revisão de design humana. Candidato

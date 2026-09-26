@@ -924,34 +924,47 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     }
 
 
-def compute_quality_score(fact_check: str, clarity_review: str | None,
-                           assets: list, topic: str) -> tuple[int, str]:
+def compute_quality_score(fact_check: str, clarity_review: str | None, assets: list, topic: str,
+                           repetition_score: float | None = None) -> tuple[int, str]:
     """Score agregado (0-100) pra dar ao revisor um resumo rápido de quão
-    confiável esse vídeo específico tende a ser, ANTES de assistir tudo -
-    cruza os três sinais de qualidade automática que o pipeline já calcula
-    separadamente (precisão factual, clareza pra leigo, relevância real das
-    imagens escolhidas), que antes só apareciam like badges soltos sem
-    resumo único. Não bloqueia nada - é só um resumo pro revisor priorizar
-    onde olhar com mais atenção; a decisão final continua sendo humana."""
+    confiável e original esse vídeo específico tende a ser, ANTES de
+    assistir tudo - cruza os quatro sinais de qualidade automática que o
+    pipeline já calcula separadamente (precisão factual, clareza pra leigo,
+    relevância real das imagens, e agora diversidade em relação aos vídeos
+    recentes do canal - o YouTube penaliza reciclagem de hook/formato, ver
+    ROADMAP.md), que antes só apareciam badges soltos sem resumo único. Não
+    bloqueia nada - é só um resumo pro revisor priorizar onde olhar com mais
+    atenção; a decisão final continua sendo humana."""
     notes = []
 
-    fact_points = {"ok": 35, "sem_fonte": 25, "indisponivel": 25, "atencao": 10}.get(fact_check, 20)
-    notes.append(f"Fatos: {fact_points}/35 ({fact_check})")
+    fact_points = {"ok": 30, "sem_fonte": 22, "indisponivel": 22, "atencao": 8}.get(fact_check, 17)
+    notes.append(f"Fatos: {fact_points}/30 ({fact_check})")
 
     if not clarity_review or clarity_review.lower().startswith("nenhum"):
-        clarity_points = 35
-        notes.append("Clareza: 35/35 (sem risco sinalizado)")
+        clarity_points = 30
+        notes.append("Clareza: 30/30 (sem risco sinalizado)")
     else:
-        clarity_points = 15
-        notes.append("Clareza: 15/35 (revisão apontou trecho(s) confuso(s)/redundante(s))")
+        clarity_points = 12
+        notes.append("Clareza: 12/30 (revisão apontou trecho(s) confuso(s)/redundante(s))")
 
-    image_points = 20  # neutro se não der pra medir (modelo indisponível, sem assets)
+    image_points = 17  # neutro se não der pra medir (modelo indisponível, sem assets)
     avg_relevance = semantic.average_relevance(topic, assets) if assets else None
     if avg_relevance is not None:
-        image_points = round(min(avg_relevance, 1.0) * 30)
-        notes.append(f"Imagens: {image_points}/30 (relevância média {avg_relevance:.2f})")
+        image_points = round(min(avg_relevance, 1.0) * 25)
+        notes.append(f"Imagens: {image_points}/25 (relevância média {avg_relevance:.2f})")
     else:
-        notes.append(f"Imagens: {image_points}/30 (não foi possível medir)")
+        notes.append(f"Imagens: {image_points}/25 (não foi possível medir)")
 
-    score = min(fact_points + clarity_points + image_points, 100)
+    diversity_points = 10  # neutro se não der pra medir (canal sem histórico ainda, ou modelo indisponível)
+    if repetition_score is not None:
+        if repetition_score >= semantic.REPETITION_THRESHOLD:
+            diversity_points = 3
+            notes.append(f"Diversidade: 3/15 (parecido demais com vídeo recente, similaridade {repetition_score:.2f})")
+        else:
+            diversity_points = 15
+            notes.append(f"Diversidade: 15/15 (tema/gancho distinto dos recentes, similaridade {repetition_score:.2f})")
+    else:
+        notes.append("Diversidade: 10/15 (sem histórico suficiente pra comparar)")
+
+    score = min(fact_points + clarity_points + image_points + diversity_points, 100)
     return score, " | ".join(notes)
