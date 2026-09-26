@@ -21,7 +21,7 @@ import requests
 from PIL import Image
 
 import config
-from pipeline import catalog, channels, notify, visual_source, youtube_analytics
+from pipeline import catalog, channels, notify, semantic, visual_source, youtube_analytics
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
@@ -700,14 +700,16 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
             if len(assets) >= 4:
                 break
             try:
-                _collect(visual_source.fetch_nasa_images_for_topic(kw, count=4 - len(assets)))
+                found = visual_source.fetch_nasa_images_for_topic(kw, count=4 - len(assets))
+                _collect(semantic.filter_relevant(title, found))
             except Exception:
                 pass
         for kw in keywords:
             if len(assets) >= 4:
                 break
             try:
-                _collect(visual_source.fetch_esa_hubble_images_for_topic(kw, count=4 - len(assets)))
+                found = visual_source.fetch_esa_hubble_images_for_topic(kw, count=4 - len(assets))
+                _collect(semantic.filter_relevant(title, found))
             except Exception:
                 pass
         if len(assets) < 2:
@@ -826,12 +828,14 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         if len(assets) >= target_count:
             break
         try:
-            _add_unique(visual_source.fetch_nasa_images_for_topic(query, count=target_count - len(assets)))
+            found = visual_source.fetch_nasa_images_for_topic(query, count=target_count - len(assets))
+            _add_unique(semantic.filter_relevant(query, found))
         except Exception:
             pass
         if len(assets) < target_count:
             try:
-                _add_unique(visual_source.fetch_esa_hubble_images_for_topic(query, count=target_count - len(assets)))
+                found = visual_source.fetch_esa_hubble_images_for_topic(query, count=target_count - len(assets))
+                _add_unique(semantic.filter_relevant(query, found))
             except Exception:
                 pass
 
@@ -855,11 +859,13 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         generic_pool.sort(
             key=lambda term: not (topic_words & {w.lower() for w in term.split()}),
         )
+        relevance_reference = f"{topic} {' '.join(search_queries)}"
         for query in generic_pool:
             if len(assets) >= target_count:
                 break
             try:
-                _add_unique(visual_source.fetch_nasa_images_for_topic(query, count=target_count - len(assets)))
+                found = visual_source.fetch_nasa_images_for_topic(query, count=target_count - len(assets))
+                _add_unique(semantic.filter_relevant(relevance_reference, found))
             except Exception:
                 continue
 

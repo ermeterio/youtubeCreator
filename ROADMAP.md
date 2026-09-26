@@ -42,11 +42,15 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
 - [x] **Corte alinhado à cena** (Short não corta mais no meio de uma transição de imagem) — DONE (25/09/2026)
 - [x] **Aprendizado por motivo de rejeição estruturado** — DONE (25/09/2026): tags rápidas de um clique
       (imagem não bate, gancho fraco, redundante, genérico demais) pré-preenchem o campo de observação.
-- [ ] **Matching de imagem por embeddings semânticos locais** — pesquisa (25/09/2026) achou uma opção
-      bem mais leve que sentence-transformers: `fastembed` (ONNX, sem PyTorch), modelo ~67-90MB, dezenas
-      de MB de dependência (não ~2GB+). Ainda DEFERIDO só porque é uma dependência nova que baixa um
-      modelo pela rede na primeira execução - pedir confirmação explícita antes de instalar, não é uma
-      decisão de código pura. Esforço: M, 100% local depois de aprovado.
+- [x] **Matching de imagem por embeddings semânticos locais** — DONE (26/09/2026), aprovado pelo dono.
+      `fastembed` (BAAI/bge-small-en-v1.5, ONNX, sem PyTorch, ~65MB, cacheado em
+      `data/assets/embedding_model/`). Toda imagem que a busca por palavra-chave (NASA/ESA) retorna
+      agora passa por uma checagem de relevância semântica (threshold 0.60, calibrado com pares
+      reais bons/ruins) antes de ser aceita - imagens sem relação real com o tema são rejeitadas em
+      vez de aceitas cegamente. Testado reproduzindo o bug original de verdade: busca por "Dawn
+      spacecraft" contra um roteiro de nebulosa - as 6 imagens (todas "Dawn Spacecraft Processing")
+      foram corretamente rejeitadas pelo filtro. Falha aberta (não bloqueia geração) se o modelo não
+      carregar por qualquer motivo.
 - [ ] **Inverter ordem: confirmar imagem disponível antes de narrar aquele trecho** — DEFERIDO
       deliberadamente: é uma mudança arquitetural grande (reescreve a ordem roteiro→imagem→narração)
       com risco real de quebrar o pipeline inteiro se malfeita sem revisão de design humana. Candidato

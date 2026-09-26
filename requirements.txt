@@ -8,3 +8,4 @@ python-dotenv
 requests
 edge-tts
 flask
+fastembed

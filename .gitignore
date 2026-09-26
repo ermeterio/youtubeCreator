@@ -10,6 +10,8 @@ secrets/
 data/catalog.db
 data/output/
 data/assets/nasa_cache/
+data/assets/embedding_model/
+data/assets/voice_previews/
 data/logs/
 data/backups/
 
