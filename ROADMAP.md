@@ -24,8 +24,11 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
       pool de fallback, logging de quando cai no fallback) — DONE (25/09/2026)
 - [x] **Loop de feedback de SEO** (retenção real do YouTube Analytics → prompt do LLM de título/gancho) — DONE (25/09/2026)
 - [x] **Fallback de conteúdo via notícias reais** (Spaceflight News API, com validação de imagem antes de usar) — DONE (25/09/2026)
-- [x] **Shorts cortados automaticamente do vídeo longo** (mesmo Ken Burns/narração até o ponto de
-      corte, corte alinhado à troca de imagem mais próxima, não meio de crossfade) — DONE (25/09/2026)
+- [x] ~~Shorts cortados automaticamente do vídeo longo (máx 58s)~~ — **REVERTIDO (26/09/2026)**: relatado
+      problema real (track 21, roteiro de 94s ficava com o fim cortado no Short). Prioridade corrigida:
+      o Short agora SEMPRE cobre a narração inteira, sem limite de duração - o vídeo se adapta ao
+      tamanho do conteúdo, o conteúdo nunca é cortado pra caber num tempo fixo. `max_duration` removido
+      de `video_build.build_video`.
 - [x] **A/B testing de thumbnail** — DONE (25/09/2026): confirmado que `videoThumbnailImpressions`/
       `videoThumbnailImpressionsClickRate` (CTR real) estão na Analytics API desde jan/2026. Todo vídeo
       novo gera 2 variantes de thumbnail; alguns dias após publicar, troca pra B, compara CTR real do

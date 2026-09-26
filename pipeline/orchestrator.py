@@ -155,17 +155,16 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
                                  credit_label=language["credit_label"], cta_text=language["cta_text"])
         catalog.update_track(track_id, video_path=str(video_path), status="video_ready")
 
-    # Short = RECORTE do vídeo longo (mesmo roteiro/narração/Ken Burns até o
-    # ponto de corte, reenquadrado em 9:16), não uma renderização paralela
-    # desconectada - relação editorial clara com o vídeo longo, que é o que a
-    # política do YouTube (2026) trata como uso legítimo de Shorts (ver
-    # ROADMAP.md). O gate de revisão humana continua valendo, ver
-    # approve_and_upload_short().
+    # Short = mesma narração/roteiro/Ken Burns completos, só reenquadrado em
+    # 9:16 - NUNCA corta o texto/narração pra caber num tempo fixo (relatado
+    # como problema real: um roteiro de 94s ficava com o fim cortado quando
+    # o Short era limitado a 58s). Prioridade é manter o conteúdo completo e
+    # informativo mesmo que isso deixe o Short mais longo que o "padrão" de
+    # Shorts curtos - correto é o vídeo caber o conteúdo, não o contrário.
     short_path = work_dir / "short.mp4"
     if not short_path.exists():
         video_build.build_video(narration_path, title, assets, short_path, vertical=True, captions=boundaries,
-                                 credit_label=language["credit_label"], cta_text=language["cta_text"],
-                                 max_duration=config.SHORT_MAX_DURATION_SECONDS)
+                                 credit_label=language["credit_label"], cta_text=language["cta_text"])
         catalog.update_track(track_id, video_vertical_path=str(short_path))
 
     thumb_path = work_dir / "thumbnail.jpg"

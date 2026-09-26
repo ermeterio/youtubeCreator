@@ -238,16 +238,12 @@ def _cta_clip(total_duration: float, resolution: tuple[int, int],
 
 def build_video(narration_path: Path, title: str, assets: list[VisualAsset], output_path: Path,
                  vertical: bool = False, captions: list[dict] | None = None,
-                 credit_label: str = "Crédito", cta_text: str = "Inscreva-se no canal →",
-                 max_duration: float | None = None) -> Path:
-    """`max_duration`, quando informado, CORTA a partir do mesmo roteiro/imagens/
-    narração/ritmo do vídeo completo (em vez de gerar uma sequência à parte) -
-    usado pelo Short, que agora é um recorte de verdade do vídeo longo (mesmo
-    Ken Burns, mesmos cortes de imagem, mesma narração até o ponto de corte),
-    não uma renderização paralela desconectada. Isso segue a política do
-    YouTube (2026), que trata Shorts cortados de conteúdo longo genuíno como
-    uso legítimo - diferente de Shorts gerados isoladamente sem relação
-    editorial clara com o vídeo longo."""
+                 credit_label: str = "Crédito", cta_text: str = "Inscreva-se no canal →") -> Path:
+    """Monta o vídeo (horizontal ou vertical/Short) cobrindo a narração
+    INTEIRA, sempre - nunca corta o roteiro pra caber num tempo fixo
+    (relatado como problema real: um Short com duração limitada cortava o
+    fim do texto). Se o roteiro for longo, o vídeo fica mais longo; a
+    prioridade é manter o conteúdo completo e informativo."""
     if not assets:
         raise ValueError("Nenhuma imagem disponível para montar o vídeo.")
 
@@ -256,15 +252,12 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
     bg_color, accent_color = palette_for(title)
 
     audio = AudioFileClip(str(narration_path))
-    full_duration = audio.duration
-    target_duration = min(max_duration, full_duration) if max_duration else full_duration
+    duration = audio.duration
     n = len(assets)
     # cada crossfade "come" CROSSFADE_DURATION da duração total da sequência
     # (os clipes se sobrepõem); compensa aqui pra sequência final bater com o
-    # áudio exatamente quando não bate no piso mínimo de 4s por imagem. Usa
-    # SEMPRE full_duration (não target_duration) pro ritmo do Ken Burns ficar
-    # idêntico ao vídeo longo até o ponto de corte, em vez de comprimido.
-    per_image_duration = max((full_duration + (n - 1) * CROSSFADE_DURATION) / n, 4.0)
+    # áudio exatamente quando não bate no piso mínimo de 4s por imagem.
+    per_image_duration = max((duration + (n - 1) * CROSSFADE_DURATION) / n, 4.0)
 
     clips = []
     for i, asset in enumerate(assets):
@@ -280,40 +273,25 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
         clips.append(clip)
 
     sequence = concatenate_videoclips(clips, method="compose", padding=-CROSSFADE_DURATION)
-    sequence = sequence.subclipped(0, full_duration).with_audio(audio)
-
-    step = per_image_duration - CROSSFADE_DURATION
-    all_cut_times = [i * step for i in range(1, len(assets))]
-
-    # Se for um corte de verdade (Short com max_duration < vídeo completo),
-    # ajusta o ponto de corte pra cair bem em cima de uma troca de imagem já
-    # planejada, em vez de cortar no meio de um crossfade - evita um corte
-    # visualmente abrupto/estranho. Só ajusta se a troca de imagem mais
-    # próxima não encurtar o Short em mais de 25% do alvo (senão mantém o
-    # corte no tempo pedido mesmo).
-    if max_duration and target_duration < full_duration:
-        earlier = [t for t in all_cut_times if t <= target_duration]
-        if earlier and earlier[-1] >= target_duration * 0.75:
-            target_duration = earlier[-1]
+    sequence = sequence.subclipped(0, duration).with_audio(audio)
 
     title_clip = (
         _safe_text_clip(title, config.FONT_TITLE, 54 if vertical else 60, stroke_width=2,
                         max_width=int(w * 0.85), color="white", stroke_color="black")
         .with_position(("center", 0.08), relative=True)
-        .with_duration(min(6, target_duration))
+        .with_duration(min(6, duration))
     )
 
-    cut_times = [t for t in all_cut_times if t < target_duration]
-
-    captions_in_range = [c for c in captions if c["start"] < target_duration] if captions else None
+    step = per_image_duration - CROSSFADE_DURATION
+    cut_times = [i * step for i in range(1, len(assets))]
 
     layers = [sequence, title_clip]
     layers += _flash_clips(cut_times, resolution, bg_color)
-    if captions_in_range:
-        layers += _caption_clips(captions_in_range, resolution, accent_color)
-    layers.append(_cta_clip(target_duration, resolution, bg_color, cta_text=cta_text))
+    if captions:
+        layers += _caption_clips(captions, resolution, accent_color)
+    layers.append(_cta_clip(duration, resolution, bg_color, cta_text=cta_text))
 
-    final = CompositeVideoClip(layers, size=(w, h)).subclipped(0, target_duration)
+    final = CompositeVideoClip(layers, size=(w, h)).subclipped(0, duration)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     final.write_videofile(
         str(output_path),

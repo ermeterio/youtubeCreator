@@ -46,12 +46,6 @@ VIDEO_FPS = 30
 THUMBNAIL_AB_TEST_WAIT_DAYS = 3
 THUMBNAIL_AB_MIN_IMPRESSIONS = 200
 
-# Duração máxima do Short - o Short agora é um RECORTE do vídeo longo (mesmo
-# roteiro/narração/Ken Burns até esse ponto), não uma renderização paralela
-# desconectada. 58s fica dentro do limite clássico de Shorts (60s) com uma
-# margem de segurança pro corte não estourar por causa de arredondamento.
-SHORT_MAX_DURATION_SECONDS = 58.0
-
 # Hierarquia tipográfica do canal (Space Grotesk + Inter + JetBrains Mono,
 # todas Google Fonts / licença OFL - uso comercial em vídeo liberado, sem
 # exigir crédito na tela). Cada papel cai para Arial Bold do Windows se o
