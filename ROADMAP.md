@@ -57,6 +57,16 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
 - [~] Escrita não-atômica em `narration.py` foi investigada e descartada como risco real: o status do
       track só avança pra "resumível" DEPOIS que a narração+pós-processamento terminam com sucesso, então
       uma falha no meio da síntese já aborta a geração inteira (não resume com arquivo truncado).
+- [x] **Mesmo padrão de escrita atômica aplicado à thumbnail** (`thumbnail.py`) - consistência, custo
+      quase zero, mesma checagem `.exists()` do orchestrator se aplica.
+- [x] **Efeito colateral do WAL no backup, encontrado ao revisar o próprio fix acima**: `backup.py`
+      fazia cópia crua do arquivo `.db` - em modo WAL, escritas recentes ficam num arquivo `-wal` à
+      parte até um checkpoint, então uma cópia crua do `.db` sozinho podia sair faltando transações
+      recentes silenciosamente. Corrigido: usa a API de backup online do próprio `sqlite3`
+      (`Connection.backup()`), que lida com WAL corretamente. Testado: escreveu um dado novo, confirmou
+      que o backup gerado logo em seguida já contém esse dado.
+
+## Agora / próximo trimestre
 
 ## Agora / próximo trimestre
 - [x] **Divulgação de IA correta** (`containsSyntheticMedia`) — DONE (25/09/2026)
