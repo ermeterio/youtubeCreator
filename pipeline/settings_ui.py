@@ -615,8 +615,8 @@ def save_client_secret(channel_id: int):
 
 
 def _run_authorization(channel_id: int, force_new: bool) -> None:
-    ch = channels.get_channel(channel_id)
     try:
+        ch = channels.get_channel(channel_id)
         _authorize_status[channel_id] = "Aguardando login no navegador..."
         info = youtube_upload.authorize_and_identify(
             channels.client_secret_path(ch["slug"]), channels.token_path(ch["slug"]), force_new=force_new
@@ -979,15 +979,17 @@ def cancel_queue_item_route(item_id: int):
 
 
 def _run_generation(channel_id: int, forced_topic: tuple[str, str] | None) -> None:
-    channel = channels.get_channel(channel_id)
+    channel_name = f"canal {channel_id}"
     try:
+        channel = channels.get_channel(channel_id)
+        channel_name = channel["name"]
         _generation_status[channel_id] = "Gerando... (roteiro, imagens, narração e dois vídeos - alguns minutos)"
         track_id = orchestrator.prepare_daily_video(channel_id, forced_topic=forced_topic)
         _generation_status[channel_id] = f"Pronto! Track {track_id} está em 'Vídeos gerados', aguardando sua revisão."
-        notify.notify_result(True, f"[{channel['name']}] Vídeo sob demanda pronto (track {track_id}).")
+        notify.notify_result(True, f"[{channel_name}] Vídeo sob demanda pronto (track {track_id}).")
     except Exception as exc:
         _generation_status[channel_id] = f"Falhou: {exc}"
-        notify.notify_result(False, f"[{channel['name']}] Geração sob demanda falhou: {exc}")
+        notify.notify_result(False, f"[{channel_name}] Geração sob demanda falhou: {exc}")
 
 
 @app.route("/channels/<int:channel_id>/generate", methods=["POST"])
@@ -1804,16 +1806,19 @@ def give_feedback(track_id: int):
 def _run_consult(track_id: int, notes: str) -> None:
     from pipeline import script_gen
 
-    track = catalog.get_track(track_id)
-    channel = channels.get_channel(track["channel_id"])
-    result = script_gen.consult_feedback(track["title"], track["script"], notes, channel["niche"] or "ciência")
+    try:
+        track = catalog.get_track(track_id)
+        channel = channels.get_channel(track["channel_id"])
+        result = script_gen.consult_feedback(track["title"], track["script"], notes, channel["niche"] or "ciência")
 
-    if result["error"]:
-        _consult_status[track_id] = result["error"]
-    else:
-        action_text = f"Entendimento: {result['understanding']}\n\nAções para os próximos vídeos: {result['actions']}"
-        catalog.update_track(track_id, feedback_action=action_text)
-        _consult_status.pop(track_id, None)
+        if result["error"]:
+            _consult_status[track_id] = result["error"]
+        else:
+            action_text = f"Entendimento: {result['understanding']}\n\nAções para os próximos vídeos: {result['actions']}"
+            catalog.update_track(track_id, feedback_action=action_text)
+            _consult_status.pop(track_id, None)
+    except Exception as exc:
+        _consult_status[track_id] = f"Falhou: {exc}"
 
 
 @app.route("/videos/<int:track_id>/consult", methods=["POST"])
