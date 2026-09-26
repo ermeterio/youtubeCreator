@@ -85,6 +85,13 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
 
 ## Mais adiante / exploratório
 - [ ] Fila multi-worker (paralelizar geração entre canais). Esforço: L.
-- [ ] Posts de comunidade (Community tab) automatizados. Esforço: S/M.
-- [ ] Painel de conformidade de licenciamento de imagens/mídia. Esforço: M/L.
+- ~~Posts de comunidade (Community tab) automatizados~~ — INVIÁVEL (verificado 26/09/2026 via
+  pesquisa): a YouTube Data API v3 não expõe NENHUM endpoint pra criar post na Community tab, é recurso
+  exclusivo do Studio. Só existiria via scraper não-oficial/serviço terceiro, o que contraria o
+  princípio do projeto (só API oficial, sem risco de ToS). Removido da fila até o Google abrir a API.
+- [ ] Painel de conformidade de licenciamento de imagens/mídia — reavaliado (26/09/2026): valor baixo
+  no momento, porque as únicas fontes de imagem hoje (NASA Images API e ESA/Hubble) já são
+  consistentemente domínio público / CC BY 4.0 - não há ambiguidade real de licença pra um painel
+  resolver ainda. Voltaria a fazer sentido só se uma fonte de imagem com licença mista for adicionada
+  no futuro. Esforço: M/L, baixa prioridade por ora.
 - [ ] SaaS multi-tenant — fora do escopo atual (ferramenta local single-tenant). Esforço: L.
