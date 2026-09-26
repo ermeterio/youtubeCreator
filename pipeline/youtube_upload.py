@@ -284,6 +284,18 @@ def reply_to_comment(comment_id: str, text: str, client_secret_path: Path, token
     return response
 
 
+def set_comment_moderation_status(comment_id: str, moderation_status: str,
+                                   client_secret_path: Path, token_path: Path) -> None:
+    """Modera um comentário (oculta/rejeita) - `moderation_status` é
+    "rejected" (spam confirmado, oculta permanentemente) ou "heldForReview"
+    (suspeito, fica em espera). Sempre disparado por clique explícito do
+    dono na interface (ver settings_ui) - a detecção de spam só SUGERE,
+    nunca modera sozinha."""
+    creds = _get_credentials(client_secret_path, token_path)
+    youtube = build("youtube", "v3", credentials=creds)
+    youtube.comments().setModerationStatus(id=comment_id, moderationStatus=moderation_status).execute()
+
+
 def delete_video(video_id: str, client_secret_path: Path, token_path: Path) -> None:
     creds = _get_credentials(client_secret_path, token_path)
     youtube = build("youtube", "v3", credentials=creds)

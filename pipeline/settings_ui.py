@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, abort, redirect, render_template_string, request, send_file, url_for
 
 import config
-from pipeline import catalog, channels, notify, orchestrator, reports, youtube_analytics, youtube_upload
+from pipeline import catalog, channels, notify, orchestrator, reports, spam_detection, youtube_analytics, youtube_upload
 
 app = Flask(__name__)
 
@@ -1117,15 +1117,37 @@ def channel_comments(channel_id: int):
     if not comments:
         rows_html = '<p class="muted">Nenhum comentário encontrado (ou comentários desativados nos vídeos deste canal).</p>'
     else:
-        rows_html = ""
+        duplicate_ids = spam_detection.flag_duplicates(comments)
+        scored = []
         for c in comments:
+            score, reasons = spam_detection.spam_score(c["text"], c["author"])
+            if c["id"] in duplicate_ids:
+                score = min(score + 20, 100)
+                reasons.append("mesma mensagem repetida em outro vídeo")
+            scored.append((c, score, reasons))
+        scored.sort(key=lambda item: item[1], reverse=True)  # mais suspeitos primeiro
+
+        rows_html = ""
+        for c, score, reasons in scored:
             suggestion = _comment_suggestions.get(c["id"], "")
             reply_disabled = "" if c["can_reply"] else "disabled"
+            spam_badge = ""
+            spam_actions = ""
+            if score >= 40:
+                spam_badge = f'<span class="badge missing">⚠ spam provável ({score}/100: {", ".join(reasons)})</span>'
+                spam_actions = f"""
+                <form class="inline" method="post" action="{url_for('moderate_comment_route', channel_id=channel_id, comment_id=c['id'])}">
+                  <input type="hidden" name="status" value="rejected">
+                  <button type="submit" class="secondary">🚫 Ocultar (spam)</button>
+                </form>
+                """
             rows_html += f"""
             <div class="panel" style="margin-bottom:12px;">
               <p><b>{c['author']}</b> <span class="muted">({c['published_at'][:10]})</span>
-              {f'<span class="badge inactive">{c["reply_count"]} resposta(s)</span>' if c['reply_count'] else ''}</p>
+              {f'<span class="badge inactive">{c["reply_count"]} resposta(s)</span>' if c['reply_count'] else ''}
+              {spam_badge}</p>
               <p>{c['text']}</p>
+              {spam_actions}
               <form method="post" action="{url_for('suggest_comment_reply_route', channel_id=channel_id, comment_id=c['id'])}" class="inline">
                 <input type="hidden" name="comment_text" value="{c['text'].replace(chr(34), '&quot;')}">
                 <button type="submit" class="secondary">💬 Sugerir resposta com IA</button>
@@ -1140,8 +1162,9 @@ def channel_comments(channel_id: int):
     body = f"""
     <p><a href="{url_for('edit_channel', channel_id=channel_id)}">&larr; Voltar pro canal</a></p>
     <h2>💬 Comentários - {ch['name']}</h2>
-    <p class="muted">Comentários recentes de qualquer vídeo do canal. A sugestão de resposta é gerada
-    pelo Llama local, mas nada é publicado sem você revisar/editar o texto e clicar em "Responder".</p>
+    <p class="muted">Comentários recentes de qualquer vídeo do canal, comentários mais suspeitos de spam
+    primeiro. A sugestão de resposta e a detecção de spam são só sugestões - nada é publicado/ocultado
+    sem você clicar explicitamente.</p>
     {rows_html}
     """
     return _render(body)
@@ -1175,6 +1198,20 @@ def reply_comment_route(channel_id: int, comment_id: str):
         _flash("Resposta publicada no YouTube.")
     except Exception as exc:
         _flash(f"Falha ao publicar resposta: {exc}")
+    return redirect(url_for("channel_comments", channel_id=channel_id))
+
+
+@app.route("/channels/<int:channel_id>/comments/<comment_id>/moderate", methods=["POST"])
+def moderate_comment_route(channel_id: int, comment_id: str):
+    ch = channels.get_channel(channel_id)
+    status = request.form.get("status", "rejected")
+    try:
+        youtube_upload.set_comment_moderation_status(
+            comment_id, status, channels.client_secret_path(ch["slug"]), channels.token_path(ch["slug"])
+        )
+        _flash("Comentário ocultado no YouTube.")
+    except Exception as exc:
+        _flash(f"Falha ao moderar comentário: {exc}")
     return redirect(url_for("channel_comments", channel_id=channel_id))
 
 

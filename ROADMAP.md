@@ -70,8 +70,12 @@ mas o ideal continua sendo checar a fila/tracks ativos antes de reiniciar.
 ## Próximos 2-3 trimestres
 - [~] **Framework de fontes de conteúdo plugável** (APOD → notícia → rotação fixa, hoje é cascata
       hardcoded) — PARCIAL, falta abstrair como estratégias intercambiáveis. Esforço: M.
-- [ ] **Gestão de comentários (moderação + resposta sugerida)** — já lemos comentários (ver acima);
-      falta responder/moderar. Esforço: M. Sem API paga.
+- [x] **Gestão de comentários (moderação + resposta sugerida)** — DONE (26/09/2026). Pesquisa de
+      mercado confirmou spam de bot (com substituição de caracteres Unicode pra escapar de filtro) é
+      dor real e crescente em 2026. Heurística local (`pipeline/spam_detection.py`, sem LLM/API paga):
+      link, frases-gatilho, excesso de emoji, mistura de alfabetos (homóglifos), mensagem duplicada do
+      mesmo autor em vídeos diferentes. Comentários com score ≥40 aparecem primeiro na tela, com botão
+      "Ocultar (spam)" (`comments.setModerationStatus`) - sempre um clique explícito, nunca automático.
 - [ ] **Upgrade opcional de LLM/TTS em nuvem** — prioridade baixa, contraria design local-first/grátis;
       só faz sentido se qualidade virar gargalo real. Esforço: S/M. **Requer API paga.**
 - ~~Repurposing multi-plataforma (TikTok/Reels)~~ — fora de escopo por decisão explícita do dono.
