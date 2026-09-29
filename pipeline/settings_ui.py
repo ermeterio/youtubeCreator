@@ -2373,7 +2373,13 @@ def main():
     channels.ensure_default_channel()
     from pipeline import queue_worker
     queue_worker.ensure_worker_started()
-    app.run(host="127.0.0.1", port=5151, debug=False)
+    # threaded=True - sem isso o servidor dev do Flask atende 1 request por
+    # vez; qualquer request mais lenta (ex.: uma chamada de API externa
+    # demorando) trava a aplicação inteira até terminar. Suspeita real de
+    # travamento em produção (servidor parou de responder por completo até
+    # ser reiniciado na mão) - com múltiplas threads, uma request lenta não
+    # bloqueia as outras.
+    app.run(host="127.0.0.1", port=5151, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
