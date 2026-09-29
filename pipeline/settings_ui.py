@@ -1584,6 +1584,16 @@ def list_videos():
 
     rows = ""
     for t in tracks:
+        publish_action = ""
+        if t["status"] == "pending_review":
+            publish_action = f"""
+            <form class="inline" method="post" action="{url_for('approve_video', track_id=t['id'])}"
+                  style="display:inline-flex; align-items:center; gap:4px;">
+              <input type="hidden" name="return_to" value="list">
+              <button type="submit" style="padding:4px 10px; font-size:0.82rem;">📤 Publicar</button>
+              {_privacy_select(f'privacy_video_row_{t["id"]}')}
+            </form>
+            """
         rows += f"""
         <tr>
           <td>{t['id']}</td>
@@ -1592,6 +1602,7 @@ def list_videos():
           <td>{_status_badge(t['status'])}</td>
           <td>{_fact_check_badge(t['fact_check_flag'])}</td>
           <td class="muted">{t['created_at'][:16].replace('T', ' ')}</td>
+          <td>{publish_action}</td>
         </tr>
         """
 
@@ -1615,8 +1626,8 @@ def list_videos():
       </select>
     </form>
     <table>
-      <tr><th>ID</th><th>Canal</th><th>Título</th><th>Status</th><th>Fact-check</th><th>Criado</th></tr>
-      {rows or '<tr><td colspan="6">Nenhum vídeo gerado ainda.</td></tr>'}
+      <tr><th>ID</th><th>Canal</th><th>Título</th><th>Status</th><th>Fact-check</th><th>Criado</th><th>Ação</th></tr>
+      {rows or '<tr><td colspan="7">Nenhum vídeo gerado ainda.</td></tr>'}
     </table>
     """
     return _render(body, active_nav="videos")
@@ -1945,6 +1956,8 @@ def _return_after_action(track_id: int):
     dependendo de onde a ação foi disparada."""
     if request.form.get("return_to") == "review":
         return redirect(url_for("batch_review"))
+    if request.form.get("return_to") == "list":
+        return redirect(url_for("list_videos"))
     return redirect(url_for("video_detail", track_id=track_id))
 
 

@@ -13,15 +13,25 @@ individualmente em video_build.py/thumbnail.py antes deste helper existir.
 from pathlib import Path
 
 
+def _tmp_path(path: Path) -> Path:
+    # Preserva a extensão real no final do nome temporário (ex.: "video.mp4"
+    # -> "video.tmp.mp4", não "video.mp4.partial") - algumas bibliotecas
+    # (ffmpeg/moviepy, entre outras) escolhem o formato de saída pela
+    # extensão do NOME DO ARQUIVO, não por um parâmetro explícito; um nome
+    # tipo "video.mp4.partial" quebra essa inferência. Bug real encontrado
+    # em produção numa retomada de geração após reinício da máquina.
+    return path.with_name(path.stem + ".tmp" + path.suffix)
+
+
 def atomic_write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".partial")
+    tmp_path = _tmp_path(path)
     tmp_path.write_bytes(data)
     tmp_path.replace(path)
 
 
 def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".partial")
+    tmp_path = _tmp_path(path)
     tmp_path.write_text(text, encoding=encoding)
     tmp_path.replace(path)

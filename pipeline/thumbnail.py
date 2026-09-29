@@ -81,7 +81,7 @@ def build_thumbnail(main_asset: VisualAsset, title: str, output_path: Path,
     # Mesmo padrão de escrita atômica do video_build.py: escreve num arquivo
     # temporário e só troca pro nome final depois de salvar com sucesso, pra
     # orchestrator.py nunca achar um ".exists()" de um arquivo truncado.
-    tmp_path = output_path.with_suffix(output_path.suffix + ".partial")
+    tmp_path = output_path.with_name(output_path.stem + ".tmp" + output_path.suffix)
     base.convert("RGB").save(tmp_path, "JPEG", quality=90)
     tmp_path.replace(output_path)
     return output_path

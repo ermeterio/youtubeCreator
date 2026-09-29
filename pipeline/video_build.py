@@ -301,8 +301,13 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
     # ffmpeg) - a próxima execução acharia "já pronto" e seguiria pro upload
     # de um vídeo corrompido, sem erro nenhum. Rename é atômico no mesmo
     # sistema de arquivos (mesma pasta aqui), então video.mp4 só existe de
-    # verdade quando está 100% completo.
-    tmp_path = output_path.with_suffix(output_path.suffix + ".partial")
+    # verdade quando está 100% completo. IMPORTANTE: o nome temporário
+    # precisa terminar com a extensão real (.mp4) - o ffmpeg escolhe o
+    # formato/muxer de saída pela extensão do arquivo, então um nome tipo
+    # "video.mp4.partial" falha na hora ("Unable to choose an output
+    # format"). Bug real encontrado em produção: uma geração retomada após
+    # reinício da máquina quebrou 100% das vezes por causa disso.
+    tmp_path = output_path.with_name(output_path.stem + ".tmp" + output_path.suffix)
     final.write_videofile(
         str(tmp_path),
         fps=config.VIDEO_FPS,
