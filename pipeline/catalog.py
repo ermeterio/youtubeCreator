@@ -77,6 +77,21 @@ CREATE TABLE IF NOT EXISTS approval_log (
     quality_score INTEGER,
     created_at TEXT NOT NULL
 );
+
+-- Agenda semanal por canal: quais dias da semana geram vídeo automaticamente
+-- e se usam a cascata de escolha de tema ou um tema fixo planejado com
+-- antecedência (ver ensure_channel_schedule). weekday segue
+-- datetime.date.weekday(): 0=segunda-feira ... 6=domingo.
+CREATE TABLE IF NOT EXISTS channel_schedule (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL,
+    weekday INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    topic_mode TEXT NOT NULL DEFAULT 'auto',
+    topic_label TEXT,
+    topic_query TEXT,
+    UNIQUE(channel_id, weekday)
+);
 """
 
 # Colunas adicionadas depois da criação inicial da tabela - CREATE TABLE IF
@@ -109,6 +124,9 @@ _MIGRATION_COLUMNS = {
         "connected_youtube_channel_title": "TEXT",
         "connected_youtube_channel_thumbnail": "TEXT",
         "connected_at": "TEXT",
+        "default_privacy": "TEXT NOT NULL DEFAULT 'private'",
+        "video_category_id": "TEXT NOT NULL DEFAULT '28'",
+        "made_for_kids": "INTEGER NOT NULL DEFAULT 0",
     },
 }
 
@@ -334,3 +352,49 @@ def list_queue_items(channel_id: int | None = None, limit: int = 50) -> list[sql
 def delete_queue_item(item_id: int) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM generation_queue WHERE id = ? AND status = 'pending'", (item_id,))
+
+
+# --- Agenda semanal por canal (ver nota no schema, tabela channel_schedule) ---
+
+def ensure_channel_schedule(channel_id: int) -> None:
+    """Garante que o canal tem as 7 linhas de agenda (uma por dia da semana),
+    todas habilitadas com modo 'auto' por padrão - idempotente, chamar
+    quantas vezes quiser. Sem isso, a agenda semanal do canal fica vazia
+    (equivalente a "nunca gerar"), então isso deve ser chamado na criação do
+    canal e defensivamente sempre que a agenda for lida/editada."""
+    with get_conn() as conn:
+        for weekday in range(7):
+            conn.execute(
+                "INSERT OR IGNORE INTO channel_schedule (channel_id, weekday, enabled, topic_mode) "
+                "VALUES (?, ?, 1, 'auto')",
+                (channel_id, weekday),
+            )
+
+
+def get_channel_schedule(channel_id: int) -> list[sqlite3.Row]:
+    """Retorna as 7 linhas de agenda desse canal, ordenadas por weekday (0-6).
+    Chama ensure_channel_schedule primeiro pra garantir que sempre há 7
+    linhas, mesmo pra canais criados antes desta feature existir."""
+    ensure_channel_schedule(channel_id)
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM channel_schedule WHERE channel_id = ? ORDER BY weekday",
+            (channel_id,),
+        ).fetchall()
+
+
+def update_schedule_day(channel_id: int, weekday: int, enabled: bool, topic_mode: str,
+                         topic_label: str | None, topic_query: str | None) -> None:
+    """Atualiza a configuração de UM dia da semana pra esse canal (upsert)."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE channel_schedule SET enabled = ?, topic_mode = ?, topic_label = ?, topic_query = ? "
+            "WHERE channel_id = ? AND weekday = ?",
+            (int(enabled), topic_mode, topic_label, topic_query, channel_id, weekday),
+        )
+        if cur.rowcount == 0:
+            conn.execute(
+                "INSERT INTO channel_schedule (channel_id, weekday, enabled, topic_mode, topic_label, topic_query) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (channel_id, weekday, int(enabled), topic_mode, topic_label, topic_query),
+            )

@@ -625,6 +625,7 @@ def edit_channel(channel_id: int):
       <a href="{url_for('edit_channel', channel_id=channel_id, tab='dados')}" class="{'active' if tab == 'dados' else ''}">📋 Dados do canal</a>
       <a href="{url_for('edit_channel', channel_id=channel_id, tab='youtube')}" class="{'active' if tab == 'youtube' else ''}">🔑 Credenciais YouTube</a>
       <a href="{url_for('edit_channel', channel_id=channel_id, tab='risco')}" class="{'active' if tab == 'risco' else ''}">⚠️ Zona de risco</a>
+      <a href="{url_for('edit_channel', channel_id=channel_id, tab='parametros')}" class="{'active' if tab == 'parametros' else ''}">📅 Agenda & Publicação</a>
     </nav>
     """
 
@@ -687,6 +688,93 @@ def edit_channel(channel_id: int):
             <button type="submit" class="secondary">Excluir canal "{ch['name']}"</button>
           </form>
         </div>
+        """
+        return _render(body)
+
+    if tab == "parametros":
+        schedule_rows = catalog.get_channel_schedule(channel_id)
+        weekday_labels = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira",
+                           "Sexta-feira", "Sábado", "Domingo"]
+
+        day_panels = ""
+        for row in schedule_rows:
+            wd = row["weekday"]
+            label = weekday_labels[wd] if 0 <= wd < 7 else f"Dia {wd}"
+            enabled = bool(row["enabled"])
+            topic_mode = row["topic_mode"] if row["topic_mode"] in ("auto", "custom") else "auto"
+            topic_label = row["topic_label"] or ""
+            topic_query = row["topic_query"] or ""
+            day_panels += f"""
+            <div class="panel accent">
+              <h3 style="margin-top:0;">{label}</h3>
+              <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+                <input type="checkbox" name="enabled_{wd}" value="1" style="width:auto;" {"checked" if enabled else ""}>
+                <span>Gerar vídeo automaticamente neste dia</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:10px;">
+                <input type="radio" name="topic_mode_{wd}" value="auto" style="width:auto;" {"checked" if topic_mode == "auto" else ""}>
+                <span>Tema automático (NASA APOD / notícia real / rotação)</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+                <input type="radio" name="topic_mode_{wd}" value="custom" style="width:auto;" {"checked" if topic_mode == "custom" else ""}>
+                <span>Tema específico</span>
+              </label>
+              <label>Rótulo do tema</label>
+              <input type="text" name="topic_label_{wd}" value="{topic_label}" placeholder="ex.: A lua de Saturno com oceano por baixo do gelo">
+              <label>Termo de busca em inglês</label>
+              <input type="text" name="topic_query_{wd}" value="{topic_query}" placeholder="ex.: Enceladus ice ocean">
+            </div>
+            """
+
+        default_privacy = ch["default_privacy"] if "default_privacy" in ch.keys() else "private"
+        video_category_id = ch["video_category_id"] if "video_category_id" in ch.keys() else "28"
+        made_for_kids = bool(ch["made_for_kids"]) if "made_for_kids" in ch.keys() else False
+
+        category_options = {
+            "28": "Ciência e Tecnologia",
+            "27": "Educação",
+            "24": "Entretenimento",
+            "22": "Pessoas e Blogs",
+            "25": "Notícias e Política",
+        }
+        category_options_html = "".join(
+            f'<option value="{cid}" {"selected" if video_category_id == cid else ""}>{cname}</option>'
+            for cid, cname in category_options.items()
+        )
+
+        publish_panel = f"""
+        <div class="panel">
+          <h3 style="margin-top:0;">Publicação</h3>
+          <label for="default_privacy">Visibilidade padrão ao aprovar</label>
+          <select name="default_privacy" id="default_privacy">
+            <option value="private" {"selected" if default_privacy == "private" else ""}>🔒 Privado</option>
+            <option value="unlisted" {"selected" if default_privacy == "unlisted" else ""}>🔗 Não listado</option>
+            <option value="public" {"selected" if default_privacy == "public" else ""}>🌐 Público</option>
+          </select>
+          <label for="video_category_id">Categoria do YouTube</label>
+          <select name="video_category_id" id="video_category_id">
+            {category_options_html}
+          </select>
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:14px;">
+            <input type="checkbox" name="made_for_kids" value="1" style="width:auto;" {"checked" if made_for_kids else ""}>
+            <span>Feito para crianças</span>
+          </label>
+          <p class="muted">Declaração exigida pelo YouTube (COPPA). Marcar isso desativa comentários,
+          notificações e alguns recursos de monetização/personalização de anúncios no vídeo, conforme
+          as próprias regras do YouTube.</p>
+        </div>
+        """
+
+        body = header + f"""
+        <form method="post" action="{url_for('save_channel_schedule', channel_id=channel_id)}">
+          <h3 style="margin-top:0;">📅 Agenda semanal</h3>
+          <p class="muted">Postagem consistente todos os dias - inclusive fim de semana - é o que mais
+          influencia o crescimento do canal. Escolha por dia se o vídeo é gerado automaticamente e se
+          usa um tema específico ou o tema automático de sempre.</p>
+          {day_panels}
+          {publish_panel}
+          <button type="submit">Salvar agenda e parâmetros</button>
+        </form>
         """
         return _render(body)
 
@@ -785,6 +873,42 @@ def delete_channel_route(channel_id: int):
     _flash(f"Canal \"{name}\" excluído do YouTube Content Creator (configuração + arquivos locais). "
            "Vídeos já publicados no YouTube, se houver, continuam lá.")
     return redirect(url_for("index"))
+
+
+@app.route("/channels/<int:channel_id>/schedule", methods=["POST"])
+def save_channel_schedule(channel_id: int):
+    for weekday in range(7):
+        enabled = request.form.get(f"enabled_{weekday}") == "1"
+        topic_mode = request.form.get(f"topic_mode_{weekday}", "auto")
+        if topic_mode not in ("auto", "custom"):
+            topic_mode = "auto"
+        topic_label = request.form.get(f"topic_label_{weekday}", "").strip() or None
+        topic_query = request.form.get(f"topic_query_{weekday}", "").strip() or None
+        if topic_mode == "custom" and not topic_label and not topic_query:
+            # tema específico marcado mas sem nada preenchido - cai pro automático
+            # em vez de salvar uma entrada inutilizável (mesma postura defensiva
+            # já usada em generate_video_route pro tema forçado do estúdio).
+            topic_mode = "auto"
+        catalog.update_schedule_day(
+            channel_id, weekday, enabled=enabled, topic_mode=topic_mode,
+            topic_label=topic_label, topic_query=topic_query,
+        )
+
+    default_privacy = request.form.get("default_privacy", "private")
+    if default_privacy not in ("private", "unlisted", "public"):
+        default_privacy = "private"
+    video_category_id = request.form.get("video_category_id", "28").strip() or "28"
+    made_for_kids = 1 if request.form.get("made_for_kids") == "1" else 0
+
+    channels.update_channel(
+        channel_id,
+        default_privacy=default_privacy,
+        video_category_id=video_category_id,
+        made_for_kids=made_for_kids,
+    )
+
+    _flash("Agenda e parâmetros de publicação atualizados.")
+    return redirect(url_for("edit_channel", channel_id=channel_id, tab="parametros"))
 
 
 _QUEUE_STATUS_LABELS = {
@@ -1557,15 +1681,15 @@ def _quality_badges_inline(track) -> str:
     """
 
 
-def _privacy_select(field_id: str = "privacy_status") -> str:
+def _privacy_select(field_id: str = "privacy_status", selected: str = "private") -> str:
     # "Visibilidade" (não "privacidade") - termo que o YouTube Studio usa pra
     # essa mesma opção, pra quem já usa o YouTube reconhecer de cara.
     return f"""
     <label for="{field_id}" class="muted" style="font-size:0.8rem; margin-left:4px;">Visibilidade:</label>
     <select name="privacy_status" id="{field_id}" style="width:auto; display:inline-block; margin:0 8px;">
-      <option value="private">🔒 Privado</option>
-      <option value="unlisted">🔗 Não listado</option>
-      <option value="public">🌐 Público</option>
+      <option value="private" {"selected" if selected == "private" else ""}>🔒 Privado</option>
+      <option value="unlisted" {"selected" if selected == "unlisted" else ""}>🔗 Não listado</option>
+      <option value="public" {"selected" if selected == "public" else ""}>🌐 Público</option>
     </select>
     """
 
@@ -1748,12 +1872,14 @@ def video_detail(track_id: int):
         elif metrics == {}:
             metrics_panel = '<p class="muted">Ainda sem dados de métricas pra este vídeo (recém-publicado ou sem visualizações no período).</p>'
 
+    default_privacy = channel["default_privacy"] if "default_privacy" in channel.keys() else "private"
+
     actions = ""
     if track["status"] == "pending_review":
         actions += f"""
         <form class="inline" method="post" action="{url_for('approve_video', track_id=track_id)}" style="display:inline-flex; align-items:center;">
           <button type="submit">📤 Publicar no YouTube</button>
-          {_privacy_select('privacy_video')}
+          {_privacy_select('privacy_video', selected=default_privacy)}
         </form>
         <form class="inline" method="post" action="{url_for('reject_video', track_id=track_id)}">
           <button type="submit" class="secondary">Rejeitar</button>
@@ -1763,7 +1889,7 @@ def video_detail(track_id: int):
         actions += f"""
         <form class="inline" method="post" action="{url_for('approve_short', track_id=track_id)}" style="display:inline-flex; align-items:center;">
           <button type="submit" class="secondary">📤 Publicar Short no YouTube</button>
-          {_privacy_select('privacy_short')}
+          {_privacy_select('privacy_short', selected=default_privacy)}
         </form>
         """
 

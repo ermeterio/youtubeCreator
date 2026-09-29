@@ -108,7 +108,8 @@ def upload_video(video_path: Path, title: str, description: str,
                   tags: list[str], client_secret_path: Path, token_path: Path,
                   thumbnail_path: Path | None = None,
                   privacy_status: str = "private",
-                  contains_synthetic_media: bool = True) -> str:
+                  contains_synthetic_media: bool = True,
+                  category_id: str = "28", made_for_kids: bool = False) -> str:
     creds = _get_credentials(client_secret_path, token_path)
     youtube = build("youtube", "v3", credentials=creds)
 
@@ -117,11 +118,11 @@ def upload_video(video_path: Path, title: str, description: str,
             "title": title,
             "description": description,
             "tags": tags,
-            "categoryId": "28",  # Science & Technology
+            "categoryId": category_id,
         },
         "status": {
             "privacyStatus": privacy_status,
-            "selfDeclaredMadeForKids": False,
+            "selfDeclaredMadeForKids": made_for_kids,
             # Disclosure de conteúdo alterado/sintético (narração e roteiro
             # gerados por IA) - campo oficial da API desde out/2024, exigido
             # pela política de rotulagem de conteúdo A/S do YouTube.

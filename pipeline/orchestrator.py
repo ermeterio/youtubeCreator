@@ -17,7 +17,7 @@ Dividido em duas etapas propositalmente:
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import config
@@ -224,10 +224,25 @@ def run_all_active_channels() -> list[int]:
     except Exception as exc:
         notify.log(f"Checagem de saúde dos canais falhou (não bloqueia a geração): {exc}")
 
+    today_weekday = date.today().weekday()
+    weekday_names = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+                      "sexta-feira", "sábado", "domingo"]
+
     track_ids = []
     for channel in channels.list_channels(active_only=True):
+        schedule = {row["weekday"]: row for row in catalog.get_channel_schedule(channel["id"])}
+        today = schedule.get(today_weekday)
+
+        if today and not today["enabled"]:
+            notify.log(f"[{channel['name']}] Agenda: hoje ({weekday_names[today_weekday]}) está desativado nessa agenda - pulado.")
+            continue
+
+        forced_topic = None
+        if today and today["topic_mode"] == "custom" and today["topic_label"] and today["topic_query"]:
+            forced_topic = (today["topic_label"], today["topic_query"])
+
         try:
-            track_id = prepare_daily_video(channel["id"])
+            track_id = prepare_daily_video(channel["id"], forced_topic=forced_topic)
             track_ids.append(track_id)
             notify.log(f"[{channel['name']}] track {track_id} pronto para revisão.")
         except Exception as exc:
@@ -251,6 +266,8 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
         client_secret_path=channels.client_secret_path(channel["slug"]),
         token_path=channels.token_path(channel["slug"]),
         thumbnail_path=track["thumbnail_path"], privacy_status=privacy_status,
+        category_id=channel["video_category_id"] if "video_category_id" in channel.keys() else "28",
+        made_for_kids=bool(channel["made_for_kids"]) if "made_for_kids" in channel.keys() else False,
     )
     catalog.update_track(
         track_id, youtube_video_id=video_id, status="uploaded",
@@ -280,6 +297,8 @@ def approve_and_upload_short(track_id: int, privacy_status: str = "private") -> 
         client_secret_path=channels.client_secret_path(channel["slug"]),
         token_path=channels.token_path(channel["slug"]),
         thumbnail_path=None, privacy_status=privacy_status,
+        category_id=channel["video_category_id"] if "video_category_id" in channel.keys() else "28",
+        made_for_kids=bool(channel["made_for_kids"]) if "made_for_kids" in channel.keys() else False,
     )
     catalog.update_track(track_id, youtube_short_video_id=video_id)
     return video_id
