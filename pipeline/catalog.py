@@ -128,6 +128,12 @@ _MIGRATION_COLUMNS = {
         "video_category_id": "TEXT NOT NULL DEFAULT '28'",
         "made_for_kids": "INTEGER NOT NULL DEFAULT 0",
     },
+    "channel_schedule": {
+        # Voz específica pra esse dia da semana - None/vazio usa a voz padrão
+        # do canal (channels.narration_voice_for). Permite, por exemplo,
+        # alternar de voz nos fins de semana sem mudar a voz padrão do canal.
+        "voice": "TEXT",
+    },
 }
 
 
@@ -384,17 +390,19 @@ def get_channel_schedule(channel_id: int) -> list[sqlite3.Row]:
 
 
 def update_schedule_day(channel_id: int, weekday: int, enabled: bool, topic_mode: str,
-                         topic_label: str | None, topic_query: str | None) -> None:
-    """Atualiza a configuração de UM dia da semana pra esse canal (upsert)."""
+                         topic_label: str | None, topic_query: str | None,
+                         voice: str | None = None) -> None:
+    """Atualiza a configuração de UM dia da semana pra esse canal (upsert).
+    `voice` é opcional - None/vazio significa "usar a voz padrão do canal"."""
     with get_conn() as conn:
         cur = conn.execute(
-            "UPDATE channel_schedule SET enabled = ?, topic_mode = ?, topic_label = ?, topic_query = ? "
+            "UPDATE channel_schedule SET enabled = ?, topic_mode = ?, topic_label = ?, topic_query = ?, voice = ? "
             "WHERE channel_id = ? AND weekday = ?",
-            (int(enabled), topic_mode, topic_label, topic_query, channel_id, weekday),
+            (int(enabled), topic_mode, topic_label, topic_query, voice, channel_id, weekday),
         )
         if cur.rowcount == 0:
             conn.execute(
-                "INSERT INTO channel_schedule (channel_id, weekday, enabled, topic_mode, topic_label, topic_query) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (channel_id, weekday, int(enabled), topic_mode, topic_label, topic_query),
+                "INSERT INTO channel_schedule (channel_id, weekday, enabled, topic_mode, topic_label, topic_query, voice) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (channel_id, weekday, int(enabled), topic_mode, topic_label, topic_query, voice),
             )

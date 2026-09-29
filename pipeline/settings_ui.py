@@ -695,6 +695,8 @@ def edit_channel(channel_id: int):
         schedule_rows = catalog.get_channel_schedule(channel_id)
         weekday_labels = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira",
                            "Sexta-feira", "Sábado", "Domingo"]
+        channel_language = channels.language_for(ch)
+        channel_default_voice = channels.narration_voice_for(ch)
 
         day_panels = ""
         for row in schedule_rows:
@@ -704,6 +706,12 @@ def edit_channel(channel_id: int):
             topic_mode = row["topic_mode"] if row["topic_mode"] in ("auto", "custom") else "auto"
             topic_label = row["topic_label"] or ""
             topic_query = row["topic_query"] or ""
+            day_voice = row["voice"] if "voice" in row.keys() and row["voice"] else ""
+            preview_voice = day_voice or channel_default_voice
+            voice_options_html = "".join(
+                f'<option value="{voice}" {"selected" if voice == day_voice else ""}>{key}</option>'
+                for key, voice in channel_language["voice_options"].items()
+            )
             day_panels += f"""
             <div class="panel accent">
               <h3 style="margin-top:0;">{label}</h3>
@@ -723,6 +731,15 @@ def edit_channel(channel_id: int):
               <input type="text" name="topic_label_{wd}" value="{topic_label}" placeholder="ex.: A lua de Saturno com oceano por baixo do gelo">
               <label>Termo de busca em inglês</label>
               <input type="text" name="topic_query_{wd}" value="{topic_query}" placeholder="ex.: Enceladus ice ocean">
+              <label>Voz da narração neste dia</label>
+              <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <select name="voice_{wd}" id="voice-select-{wd}"
+                        onchange="document.getElementById('voice-audio-{wd}').src = '/voice_preview/' + (this.value || '{channel_default_voice}') + '.mp3'">
+                  <option value="">(usar a voz padrão do canal: {channel_default_voice})</option>
+                  {voice_options_html}
+                </select>
+                <audio id="voice-audio-{wd}" controls preload="none" src="/voice_preview/{preview_voice}.mp3" style="height:32px;"></audio>
+              </div>
             </div>
             """
 
@@ -889,9 +906,10 @@ def save_channel_schedule(channel_id: int):
             # em vez de salvar uma entrada inutilizável (mesma postura defensiva
             # já usada em generate_video_route pro tema forçado do estúdio).
             topic_mode = "auto"
+        voice = request.form.get(f"voice_{weekday}", "").strip() or None
         catalog.update_schedule_day(
             channel_id, weekday, enabled=enabled, topic_mode=topic_mode,
-            topic_label=topic_label, topic_query=topic_query,
+            topic_label=topic_label, topic_query=topic_query, voice=voice,
         )
 
     default_privacy = request.form.get("default_privacy", "private")

@@ -91,7 +91,8 @@ def _build_description(topic: str, script: str, credits: list[str]) -> str:
     )
 
 
-def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, str] | None = None) -> int:
+def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, str] | None = None,
+                         forced_voice: str | None = None) -> int:
     catalog.init_db()
     channel = channels.get_channel(channel_id) if channel_id else channels.ensure_default_channel()
 
@@ -152,7 +153,7 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
 
         raw_narration_path = work_dir / "narration_raw.mp3"
         narration_path = work_dir / "narration.mp3"
-        voice = channels.narration_voice_for(channel)
+        voice = forced_voice or channels.narration_voice_for(channel)
         _, boundaries = narration.generate_narration_with_boundaries(script, raw_narration_path, voice=voice)
         audio_post.postprocess_audio(raw_narration_path, narration_path)
         catalog.update_track(track_id, narration_path=str(narration_path), status="narration_ready")
@@ -240,9 +241,10 @@ def run_all_active_channels() -> list[int]:
         forced_topic = None
         if today and today["topic_mode"] == "custom" and today["topic_label"] and today["topic_query"]:
             forced_topic = (today["topic_label"], today["topic_query"])
+        forced_voice = today["voice"] if today and "voice" in today.keys() and today["voice"] else None
 
         try:
-            track_id = prepare_daily_video(channel["id"], forced_topic=forced_topic)
+            track_id = prepare_daily_video(channel["id"], forced_topic=forced_topic, forced_voice=forced_voice)
             track_ids.append(track_id)
             notify.log(f"[{channel['name']}] track {track_id} pronto para revisão.")
         except Exception as exc:

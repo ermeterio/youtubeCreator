@@ -114,10 +114,14 @@ LANGUAGES = {
         "default_series_primary": "Direto da Fonte",
         "default_series_fallback": "Round-up Rápido",
         "preview_text": "Esta é uma prévia da voz de narração deste canal, usada pra ler o roteiro dos vídeos.",
+        # pt-BR só tem 3 vozes neurais no catálogo da Microsoft (confirmado
+        # via consulta real ao edge-tts em 26/09/2026 - não há mais nenhuma
+        # disponível pra adicionar). Thalita é a variante "Multilingual"
+        # (modelo mais novo, soa menos robótica) - já é o default.
         "voice_options": {
+            "thalita": "pt-BR-ThalitaMultilingualNeural",
             "antonio": "pt-BR-AntonioNeural",
             "francisca": "pt-BR-FranciscaNeural",
-            "thalita": "pt-BR-ThalitaMultilingualNeural",
         },
         "default_voice": "pt-BR-ThalitaMultilingualNeural",
     },
@@ -129,10 +133,18 @@ LANGUAGES = {
         "default_series_primary": "Straight From The Source",
         "default_series_fallback": "Quick Roundup",
         "preview_text": "This is a preview of this channel's narration voice, used to read the video scripts.",
+        # Vozes "Multilingual" (Andrew/Ava/Brian/Emma) usam o modelo neural
+        # mais novo da Microsoft - soam nitidamente menos robóticas que as
+        # vozes "clássicas" (Guy/Jenny/etc). Levantado via consulta real ao
+        # catálogo do edge-tts (26/09/2026) - en-US tem 18 vozes disponíveis
+        # ao todo, essas 6 são as recomendadas por qualidade/naturalidade.
         "voice_options": {
-            "guy": "en-US-GuyNeural",
-            "jenny": "en-US-JennyNeural",
             "ava": "en-US-AvaMultilingualNeural",
+            "andrew": "en-US-AndrewMultilingualNeural",
+            "emma": "en-US-EmmaMultilingualNeural",
+            "brian": "en-US-BrianMultilingualNeural",
+            "jenny": "en-US-JennyNeural",
+            "guy": "en-US-GuyNeural",
         },
         "default_voice": "en-US-AvaMultilingualNeural",
     },
@@ -144,9 +156,13 @@ LANGUAGES = {
         "default_series_primary": "Directo De La Fuente",
         "default_series_fallback": "Resumen Rápido",
         "preview_text": "Esta es una vista previa de la voz de narración de este canal.",
+        # es-ES só tem 3 vozes neurais no catálogo da Microsoft (nenhuma
+        # variante Multilingual disponível pra esse idioma ainda, confirmado
+        # via consulta real 26/09/2026) - as 3 estão listadas aqui.
         "voice_options": {
-            "alvaro": "es-ES-AlvaroNeural",
             "elvira": "es-ES-ElviraNeural",
+            "ximena": "es-ES-XimenaNeural",
+            "alvaro": "es-ES-AlvaroNeural",
         },
         "default_voice": "es-ES-ElviraNeural",
     },
