@@ -4,6 +4,48 @@ Atualizado em 2026-09-25, com base em pesquisa de mercado (agentes especialistas
 foi implementado no mesmo dia. Foco exclusivo em YouTube por decisão do dono do canal — recursos
 de outras plataformas (TikTok/Reels) estão fora de escopo por ora.
 
+## Reforma de UX/arquitetura de informação (26/09/2026)
+Reclamação direta do dono: usabilidade piorando conforme features se acumulavam, telas empilhadas,
+sem caminho de volta consistente, e "não consigo encontrar os vídeos que de fato estão no YouTube".
+Dois especialistas (auditoria de UX/heurística + auditoria de fluxo de produção de conteúdo)
+revisaram as 13 telas do app de ponta a ponta. Causa raiz confirmada: o link pros vídeos reais
+publicados no YouTube só existia enterrado dentro do bloco de credenciais OAuth da tela de editar
+canal, único caminho de acesso em todo o app.
+
+**Implementado:**
+- [x] Nav global: de 3 itens (10 telas órfãs, só alcançáveis via botão interno) pra 5: **Início,
+      Canais, Rascunhos, No YouTube, Desempenho**.
+- [x] Nova home (`/`) - painel cross-canal de "o que precisa da sua atenção": rascunhos aguardando
+      revisão, gerações com falha, comentários recentes/spam, por canal. Lista de canais (antes a
+      home) moveu pra `/channels`.
+- [x] Novo hub `/youtube` ("No YouTube") - 1 clique de qualquer lugar pros vídeos publicados,
+      comentários e métricas de cada canal. Resolve diretamente a queixa relatada.
+- [x] Nomenclatura fixa: "Rascunho" (vídeo gerado localmente, pendente/publicado) vs "Publicado no
+      YouTube" (dado real da API) - nunca mais "vídeo" sozinho e ambíguo.
+- [x] `/videos/<id>`: botões de decisão (aprovar/rejeitar/publicar) movidos pra DEPOIS do
+      player+roteiro (antes vinham primeiro, favorecendo decisão por impulso). Os 4 sub-scores de
+      qualidade (fatos/clareza/imagens/diversidade) viraram badges sempre visíveis (antes só em
+      tooltip de hover, invisível em toque/mobile). Zona de exclusão virou `<details>` recolhido.
+      Mensagem pós-aprovação aponta explicitamente pra "No YouTube" pra fechar o ciclo
+      aprovar→confirmar-que-publicou.
+- [x] `edit_channel` (a tela mais sobrecarregada, apontada pelos dois especialistas): quebrada em 3
+      abas (dados/credenciais YouTube/zona de risco) em vez de 1 scroll com 7+ responsabilidades.
+      Todos os redirects relacionados (salvar credencial, autorizar, ativar/desativar) levam pra aba
+      certa agora.
+- [x] Deduplicado o grid de vídeos do Estúdio (mesma info do que `/videos?channel_id=X`) - agora se
+      explica e linka pra lá em vez de manter 2 implementações da mesma coisa.
+- [x] Chave da NASA (config, não trabalho do dia a dia) virou `<details>` recolhido no fim de
+      `/channels`, em vez de ser a primeira coisa mostrada.
+
+Validado: as 15 telas renderizam 200 depois de toda a reforma; conteúdo crítico checado
+(contadores reais na home, link antigo removido, sem duplicidade de título nas abas).
+
+**Deliberadamente não feito nesta rodada** (custo/risco maior que o benefício agora): renomear as
+URLs das rotas (rótulos/estrutura já resolvem o problema relatado, renomear URL só adicionaria
+risco de regressão num arquivo de ~2000 linhas com dezenas de `url_for`); breadcrumb com rastreio
+de origem real (`?from=`) - o "voltar" ficou mais consistente mas ainda é link fixo, não dinâmico;
+ordenar a lista de canais por urgência.
+
 ## Novidades de política que motivam prioridades (confirmadas via pesquisa, jan/2026)
 - Divulgação de conteúdo sintético/alterado (`containsSyntheticMedia`) passou de "recomendada" para
   **obrigatória** — risco real de desmonetização/remoção por descumprimento.
