@@ -142,6 +142,16 @@ _MIGRATION_COLUMNS = {
         # "+NHz"/"-NHz". Vazio = usa o padrão de fábrica da voz ("+0%"/"+0Hz").
         "narration_rate": "TEXT NOT NULL DEFAULT '+0%'",
         "narration_pitch": "TEXT NOT NULL DEFAULT '+0Hz'",
+        # Provedor de narração opcional pago (voz bem mais natural que o
+        # edge-tts gratuito) - 'edge' (padrão) usa o motor grátis de sempre,
+        # 'elevenlabs' usa a conta/chave própria do dono. Se a chamada à
+        # ElevenLabs falhar por qualquer motivo (cota do plano grátis
+        # estourada, chave inválida, API fora do ar), o pipeline cai
+        # automaticamente pro edge-tts - a geração diária nunca trava
+        # esperando um provedor pago responder.
+        "tts_provider": "TEXT NOT NULL DEFAULT 'edge'",
+        "elevenlabs_api_key": "TEXT",
+        "elevenlabs_voice_id": "TEXT",
     },
     "channel_schedule": {
         # Voz específica pra esse dia da semana - None/vazio usa a voz padrão

@@ -156,8 +156,8 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         voice = forced_voice or channels.narration_voice_for(channel)
         rate = channels.narration_rate_for(channel)
         pitch = channels.narration_pitch_for(channel)
-        _, boundaries = narration.generate_narration_with_boundaries(
-            script, raw_narration_path, voice=voice, rate=rate, pitch=pitch
+        _, boundaries = narration.generate_narration_for_channel(
+            script, raw_narration_path, channel, voice=voice, rate=rate, pitch=pitch
         )
         audio_post.postprocess_audio(raw_narration_path, narration_path)
         catalog.update_track(track_id, narration_path=str(narration_path), status="narration_ready")

@@ -10,7 +10,7 @@ from pathlib import Path
 import edge_tts
 
 import config
-from pipeline import text_normalize
+from pipeline import notify, text_normalize
 
 
 def _strip_punct(word: str) -> str:
@@ -82,6 +82,30 @@ def generate_narration_with_boundaries(text: str, output_path: Path, voice: str 
                                         rate: str = "+0%", pitch: str = "+0Hz") -> tuple[Path, list[dict]]:
     boundaries = asyncio.run(_synthesize(text, output_path, voice or config.NARRATION_VOICE, rate, pitch))
     return output_path, boundaries
+
+
+def generate_narration_for_channel(text: str, output_path: Path, channel,
+                                    voice: str | None = None, rate: str = "+0%",
+                                    pitch: str = "+0Hz") -> tuple[Path, list[dict]]:
+    """Ponto de entrada usado pelo orquestrador: decide o provedor (edge-tts
+    grátis, ou ElevenLabs se o canal tiver chave configurada) e SEMPRE cai de
+    volta pro edge-tts se a ElevenLabs falhar por qualquer motivo (cota do
+    plano grátis estourada, chave inválida, API fora do ar) - a geração
+    diária automática não pode travar esperando um provedor pago responder."""
+    provider = channel["tts_provider"] if "tts_provider" in channel.keys() else "edge"
+    api_key = channel["elevenlabs_api_key"] if "elevenlabs_api_key" in channel.keys() else None
+    voice_id = channel["elevenlabs_voice_id"] if "elevenlabs_voice_id" in channel.keys() else None
+
+    if provider == "elevenlabs" and api_key and voice_id:
+        try:
+            from pipeline import narration_elevenlabs
+            return narration_elevenlabs.synthesize_with_boundaries(text, output_path, api_key, voice_id)
+        except Exception as exc:
+            notify.log(
+                f"[narração] ElevenLabs falhou ({exc}) - usando edge-tts gratuito pra não travar a geração."
+            )
+
+    return generate_narration_with_boundaries(text, output_path, voice=voice, rate=rate, pitch=pitch)
 
 
 PREVIEW_DIR = config.ASSETS_DIR / "voice_previews"

@@ -1039,6 +1039,82 @@ def _video_grid_html(channel_id: int) -> str:
     return grid + modal_shell
 
 
+def _elevenlabs_panel(channel_id: int, ch) -> str:
+    """Painel opcional de voz premium (ElevenLabs) - fica sempre visível
+    (mesmo sem chave configurada) pra quem quiser cadastrar depois; quando
+    já tem chave salva, busca as vozes reais da conta pra montar o seletor
+    e valida a chave ao vivo (com timeout curto e fallback silencioso -
+    nunca quebra a página do Estúdio se a API estiver lenta/fora do ar)."""
+    provider = ch["tts_provider"] if "tts_provider" in ch.keys() and ch["tts_provider"] else "edge"
+    api_key = (ch["elevenlabs_api_key"] if "elevenlabs_api_key" in ch.keys() else None) or ""
+    current_voice_id = (ch["elevenlabs_voice_id"] if "elevenlabs_voice_id" in ch.keys() else None) or ""
+
+    voices_html = '<option value="">(cole a chave e salve pra listar as vozes da sua conta)</option>'
+    key_status = ""
+    if api_key:
+        try:
+            from pipeline import narration_elevenlabs
+            voices = narration_elevenlabs.list_voices(api_key)
+            voices_html = "".join(
+                f'<option value="{v["voice_id"]}" {"selected" if v["voice_id"] == current_voice_id else ""}>'
+                f'{v["name"]}{" 🇧🇷" if any(l.get("language") == "pt" for l in v.get("verified_languages") or []) else ""}'
+                f'</option>'
+                for v in voices
+            )
+            key_status = f'<p class="muted">✅ Chave válida - {len(voices)} vozes disponíveis na sua conta.</p>'
+        except Exception as exc:
+            key_status = f'<p class="muted">⚠️ Não consegui validar a chave agora ({exc}) - confira se está correta.</p>'
+
+    checked_edge = "checked" if provider != "elevenlabs" else ""
+    checked_eleven = "checked" if provider == "elevenlabs" else ""
+
+    return f"""
+    <div class="panel accent">
+      <h3 style="margin-top:0;">🚀 Voz premium (ElevenLabs, opcional)</h3>
+      <p class="muted">Motor de voz bem mais natural que o gratuito - exige conta própria na ElevenLabs
+      (plano grátis: 10 mil caracteres/mês). Se a chamada falhar por qualquer motivo (cota do mês
+      esgotada, chave inválida, API fora do ar), a geração cai automaticamente pro edge-tts gratuito -
+      nunca trava o vídeo do dia.</p>
+      <form method="post" action="{url_for('update_channel_elevenlabs', channel_id=channel_id)}">
+        <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+          <input type="radio" name="tts_provider" value="edge" style="width:auto;" {checked_edge}>
+          <span>Usar edge-tts (grátis, padrão)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+          <input type="radio" name="tts_provider" value="elevenlabs" style="width:auto;" {checked_eleven}>
+          <span>Usar ElevenLabs (premium)</span>
+        </label>
+        <label for="elevenlabs_api_key" style="margin-top:10px;">Chave de API da ElevenLabs</label>
+        <input type="password" name="elevenlabs_api_key" id="elevenlabs_api_key" value="{api_key}"
+               placeholder="sk_...">
+        {key_status}
+        <label for="elevenlabs_voice_id">Voz (conta ElevenLabs)</label>
+        <select name="elevenlabs_voice_id" id="elevenlabs_voice_id">
+          {voices_html}
+        </select>
+        <button type="submit" class="secondary" style="margin-top:10px;">Salvar configuração ElevenLabs</button>
+      </form>
+    </div>
+    """
+
+
+@app.route("/channels/<int:channel_id>/elevenlabs", methods=["POST"])
+def update_channel_elevenlabs(channel_id: int):
+    provider = request.form.get("tts_provider", "edge")
+    if provider not in ("edge", "elevenlabs"):
+        provider = "edge"
+    api_key = request.form.get("elevenlabs_api_key", "").strip() or None
+    voice_id = request.form.get("elevenlabs_voice_id", "").strip() or None
+    channels.update_channel(
+        channel_id, tts_provider=provider, elevenlabs_api_key=api_key, elevenlabs_voice_id=voice_id
+    )
+    if provider == "elevenlabs" and (not api_key or not voice_id):
+        _flash("Provedor ElevenLabs selecionado, mas falta chave e/ou voz - a geração vai usar edge-tts até isso ser preenchido.")
+    else:
+        _flash("Configuração de voz premium atualizada.")
+    return redirect(url_for("channel_studio", channel_id=channel_id))
+
+
 @app.route("/channels/<int:channel_id>/studio")
 def channel_studio(channel_id: int):
     ch = channels.get_channel(channel_id)
@@ -1186,6 +1262,8 @@ def channel_studio(channel_id: int):
     </div>
     """
 
+    elevenlabs_panel = _elevenlabs_panel(channel_id, ch)
+
     body = f"""
     <p><a href="{url_for('edit_channel', channel_id=channel_id)}">&larr; Voltar pro canal</a></p>
     <h2>🎬 Estúdio de geração - {ch['name']}</h2>
@@ -1196,6 +1274,7 @@ def channel_studio(channel_id: int):
 
     {best_day_note}
     {voice_panel}
+    {elevenlabs_panel}
 
     <div class="panel accent">
       <h3 style="margin-top:0;">Tema automático</h3>
