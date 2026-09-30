@@ -10,6 +10,7 @@ from pathlib import Path
 import edge_tts
 
 import config
+from pipeline import text_normalize
 
 
 def _strip_punct(word: str) -> str:
@@ -50,6 +51,7 @@ async def _synthesize(text: str, output_path: Path, voice: str) -> list[dict]:
     edge-tts já emite durante a geração - dão o timestamp exato (em segundos)
     de cada palavra narrada, sem precisar de transcrição/alinhamento à parte.
     Usado para sincronizar as legendas dinâmicas no vídeo."""
+    text = text_normalize.normalize_for_speech(text)
     communicate = edge_tts.Communicate(text, voice, boundary="WordBoundary")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     boundaries = []
