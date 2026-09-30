@@ -154,7 +154,11 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         raw_narration_path = work_dir / "narration_raw.mp3"
         narration_path = work_dir / "narration.mp3"
         voice = forced_voice or channels.narration_voice_for(channel)
-        _, boundaries = narration.generate_narration_with_boundaries(script, raw_narration_path, voice=voice)
+        rate = channels.narration_rate_for(channel)
+        pitch = channels.narration_pitch_for(channel)
+        _, boundaries = narration.generate_narration_with_boundaries(
+            script, raw_narration_path, voice=voice, rate=rate, pitch=pitch
+        )
         audio_post.postprocess_audio(raw_narration_path, narration_path)
         catalog.update_track(track_id, narration_path=str(narration_path), status="narration_ready")
         # Guarda imagens+legendas em disco ANTES de montar vídeo - é a parte

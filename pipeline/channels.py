@@ -86,6 +86,18 @@ def narration_voice_for(channel: sqlite3.Row) -> str:
     return language_for(channel)["default_voice"]
 
 
+def narration_rate_for(channel: sqlite3.Row) -> str:
+    if "narration_rate" in channel.keys() and channel["narration_rate"]:
+        return channel["narration_rate"]
+    return "+0%"
+
+
+def narration_pitch_for(channel: sqlite3.Row) -> str:
+    if "narration_pitch" in channel.keys() and channel["narration_pitch"]:
+        return channel["narration_pitch"]
+    return "+0Hz"
+
+
 def topics_for(channel: sqlite3.Row) -> list[tuple[str, str]]:
     return [tuple(t) for t in json.loads(channel["topics_json"])]
 

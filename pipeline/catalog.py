@@ -136,6 +136,12 @@ _MIGRATION_COLUMNS = {
         "default_privacy": "TEXT NOT NULL DEFAULT 'private'",
         "video_category_id": "TEXT NOT NULL DEFAULT '28'",
         "made_for_kids": "INTEGER NOT NULL DEFAULT 0",
+        # Ajuste de ritmo/tom aplicado à voz neural gratuita (edge-tts) -
+        # reduz a sensação "robótica" sem custar nada nem trocar de voz.
+        # Formato esperado pelo edge-tts: rate em "+N%"/"-N%", pitch em
+        # "+NHz"/"-NHz". Vazio = usa o padrão de fábrica da voz ("+0%"/"+0Hz").
+        "narration_rate": "TEXT NOT NULL DEFAULT '+0%'",
+        "narration_pitch": "TEXT NOT NULL DEFAULT '+0Hz'",
     },
     "channel_schedule": {
         # Voz específica pra esse dia da semana - None/vazio usa a voz padrão

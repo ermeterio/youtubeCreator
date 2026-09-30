@@ -1136,24 +1136,53 @@ def channel_studio(channel_id: int):
 
     language = channels.language_for(ch)
     current_voice = channels.narration_voice_for(ch)
+    current_rate = channels.narration_rate_for(ch)
+    current_pitch = channels.narration_pitch_for(ch)
     voice_options_html = "".join(
         f'<option value="{voice}" {"selected" if voice == current_voice else ""}>{key} ({voice})</option>'
         for key, voice in language["voice_options"].items()
     )
+    rate_options = [("-15%", "Bem mais devagar"), ("-10%", "Mais devagar"), ("-5%", "Levemente mais devagar"),
+                    ("+0%", "Padrão da voz"), ("+5%", "Levemente mais rápido"), ("+10%", "Mais rápido")]
+    pitch_options = [("-10Hz", "Mais grave"), ("-5Hz", "Levemente mais grave"), ("+0Hz", "Padrão da voz"),
+                      ("+5Hz", "Levemente mais agudo"), ("+10Hz", "Mais agudo")]
+    rate_options_html = "".join(
+        f'<option value="{v}" {"selected" if v == current_rate else ""}>{label} ({v})</option>'
+        for v, label in rate_options
+    )
+    pitch_options_html = "".join(
+        f'<option value="{v}" {"selected" if v == current_pitch else ""}>{label} ({v})</option>'
+        for v, label in pitch_options
+    )
     voice_panel = f"""
     <div class="panel">
       <h3 style="margin-top:0;">🎙 Voz da narração</h3>
-      <p class="muted">Escolha e ouça a prévia antes de decidir - muda a voz usada em TODOS os próximos
-      vídeos deste canal (não afeta vídeos já gerados).</p>
+      <p class="muted">Escolha, ajuste ritmo/tom e ouça a prévia antes de decidir - vale para TODOS os
+      próximos vídeos deste canal (não afeta vídeos já gerados). Diminuir um pouco o ritmo costuma soar
+      menos robótico que o padrão da voz.</p>
       <form method="post" action="{url_for('update_channel_voice', channel_id=channel_id)}"
             style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <select name="narration_voice" id="voice-select"
-                onchange="document.getElementById('voice-audio').src = '/voice_preview/' + this.value + '.mp3'">
+        <select name="narration_voice" id="voice-select" onchange="updateVoicePreview()">
           {voice_options_html}
         </select>
-        <audio id="voice-audio" controls preload="none" src="/voice_preview/{current_voice}.mp3"></audio>
+        <select name="narration_rate" id="rate-select" onchange="updateVoicePreview()">
+          {rate_options_html}
+        </select>
+        <select name="narration_pitch" id="pitch-select" onchange="updateVoicePreview()">
+          {pitch_options_html}
+        </select>
+        <audio id="voice-audio" controls preload="none"
+               src="/voice_preview/{current_voice}.mp3?rate={current_rate}&pitch={current_pitch}"></audio>
         <button type="submit" class="secondary">Salvar como voz do canal</button>
       </form>
+      <script>
+        function updateVoicePreview() {{
+          const voice = document.getElementById('voice-select').value;
+          const rate = document.getElementById('rate-select').value;
+          const pitch = document.getElementById('pitch-select').value;
+          document.getElementById('voice-audio').src = '/voice_preview/' + voice + '.mp3?rate=' + encodeURIComponent(rate) + '&pitch=' + encodeURIComponent(pitch);
+        }}
+      </script>
     </div>
     """
 
@@ -2085,6 +2114,18 @@ def track_file(track_id: int, kind: str):
     return send_file(Path(raw_path))
 
 
+_RATE_RE = re.compile(r"^[+-]\d{1,3}%$")
+_PITCH_RE = re.compile(r"^[+-]\d{1,3}Hz$")
+
+
+def _safe_rate(value: str | None) -> str:
+    return value if value and _RATE_RE.match(value) else "+0%"
+
+
+def _safe_pitch(value: str | None) -> str:
+    return value if value and _PITCH_RE.match(value) else "+0Hz"
+
+
 @app.route("/voice_preview/<voice>.mp3")
 def voice_preview(voice: str):
     from pipeline import narration
@@ -2096,8 +2137,10 @@ def voice_preview(voice: str):
         (lang for lang in config.LANGUAGES.values() if voice in lang["voice_options"].values()),
         config.LANGUAGES[config.DEFAULT_LANGUAGE],
     )
+    rate = _safe_rate(request.args.get("rate"))
+    pitch = _safe_pitch(request.args.get("pitch"))
     try:
-        path = narration.get_or_build_voice_preview(voice, language["preview_text"])
+        path = narration.get_or_build_voice_preview(voice, language["preview_text"], rate=rate, pitch=pitch)
     except Exception as exc:
         abort(502, description=f"Falha ao gerar prévia de voz: {exc}")
     return send_file(path)
@@ -2108,8 +2151,10 @@ def update_channel_voice(channel_id: int):
     voice = request.form.get("narration_voice", "").strip()
     if not voice:
         abort(400)
-    channels.update_channel(channel_id, narration_voice=voice)
-    _flash(f"Voz de narração do canal atualizada para \"{voice}\".")
+    rate = _safe_rate(request.form.get("narration_rate"))
+    pitch = _safe_pitch(request.form.get("narration_pitch"))
+    channels.update_channel(channel_id, narration_voice=voice, narration_rate=rate, narration_pitch=pitch)
+    _flash(f"Voz de narração do canal atualizada para \"{voice}\" (ritmo {rate}, tom {pitch}).")
     return redirect(request.referrer or url_for("channel_studio", channel_id=channel_id))
 
 

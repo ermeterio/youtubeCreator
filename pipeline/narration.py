@@ -46,13 +46,17 @@ def _align_punctuation(script: str, boundaries: list[dict]) -> list[dict]:
     return aligned
 
 
-async def _synthesize(text: str, output_path: Path, voice: str) -> list[dict]:
+async def _synthesize(text: str, output_path: Path, voice: str,
+                       rate: str = "+0%", pitch: str = "+0Hz") -> list[dict]:
     """Sintetiza e, ao mesmo tempo, coleta os eventos WordBoundary que o
     edge-tts já emite durante a geração - dão o timestamp exato (em segundos)
     de cada palavra narrada, sem precisar de transcrição/alinhamento à parte.
-    Usado para sincronizar as legendas dinâmicas no vídeo."""
+    Usado para sincronizar as legendas dinâmicas no vídeo.
+
+    `rate`/`pitch` ajustam ritmo e tom da voz neural (ex.: "-10%", "-5Hz") -
+    reduzem a sensação robótica sem trocar de voz nem custar nada."""
     text = text_normalize.normalize_for_speech(text)
-    communicate = edge_tts.Communicate(text, voice, boundary="WordBoundary")
+    communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch, boundary="WordBoundary")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     boundaries = []
     with open(output_path, "wb") as f:
@@ -68,27 +72,29 @@ async def _synthesize(text: str, output_path: Path, voice: str) -> list[dict]:
     return _align_punctuation(text, boundaries)
 
 
-def generate_narration(text: str, output_path: Path, voice: str | None = None) -> Path:
-    asyncio.run(_synthesize(text, output_path, voice or config.NARRATION_VOICE))
+def generate_narration(text: str, output_path: Path, voice: str | None = None,
+                        rate: str = "+0%", pitch: str = "+0Hz") -> Path:
+    asyncio.run(_synthesize(text, output_path, voice or config.NARRATION_VOICE, rate, pitch))
     return output_path
 
 
-def generate_narration_with_boundaries(text: str, output_path: Path,
-                                        voice: str | None = None) -> tuple[Path, list[dict]]:
-    boundaries = asyncio.run(_synthesize(text, output_path, voice or config.NARRATION_VOICE))
+def generate_narration_with_boundaries(text: str, output_path: Path, voice: str | None = None,
+                                        rate: str = "+0%", pitch: str = "+0Hz") -> tuple[Path, list[dict]]:
+    boundaries = asyncio.run(_synthesize(text, output_path, voice or config.NARRATION_VOICE, rate, pitch))
     return output_path, boundaries
 
 
 PREVIEW_DIR = config.ASSETS_DIR / "voice_previews"
 
 
-def get_or_build_voice_preview(voice: str, text: str) -> Path:
-    """Prévia curta de uma voz específica, gerada uma vez e cacheada em disco
-    (mesma voz = mesmo arquivo sempre) - usada na interface pra ouvir a voz
-    ANTES de escolher, em vez de só ver o nome e ter que gerar um vídeo
-    inteiro pra descobrir como ela soa."""
+def get_or_build_voice_preview(voice: str, text: str, rate: str = "+0%", pitch: str = "+0Hz") -> Path:
+    """Prévia curta de uma voz específica (+ ritmo/tom), gerada uma vez e
+    cacheada em disco (mesma combinação = mesmo arquivo sempre) - usada na
+    interface pra ouvir a voz ANTES de escolher, em vez de só ver o nome e
+    ter que gerar um vídeo inteiro pra descobrir como ela soa."""
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    dest = PREVIEW_DIR / f"{voice}.mp3"
+    suffix = "" if rate == "+0%" and pitch == "+0Hz" else f"_{rate}_{pitch}".replace("%", "pct")
+    dest = PREVIEW_DIR / f"{voice}{suffix}.mp3"
     if not dest.exists():
-        generate_narration(text, dest, voice=voice)
+        generate_narration(text, dest, voice=voice, rate=rate, pitch=pitch)
     return dest
