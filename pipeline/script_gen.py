@@ -729,6 +729,22 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
                 _collect(semantic.filter_relevant(title, found))
             except Exception:
                 pass
+        for kw in keywords:
+            if len(assets) >= 4:
+                break
+            try:
+                found = visual_source.fetch_eso_images_for_topic(kw, count=4 - len(assets))
+                _collect(semantic.filter_relevant(title, found))
+            except Exception:
+                pass
+        for kw in keywords:
+            if len(assets) >= 4:
+                break
+            try:
+                found = visual_source.fetch_noirlab_images_for_topic(kw, count=4 - len(assets))
+                _collect(semantic.filter_relevant(title, found))
+            except Exception:
+                pass
         if len(assets) < 2:
             continue
 
@@ -886,6 +902,18 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         if len(assets) < target_count:
             try:
                 found = visual_source.fetch_esa_hubble_images_for_topic(query, count=target_count - len(assets))
+                _add_unique(semantic.filter_relevant(query, found))
+            except Exception:
+                pass
+        if len(assets) < target_count:
+            try:
+                found = visual_source.fetch_eso_images_for_topic(query, count=target_count - len(assets))
+                _add_unique(semantic.filter_relevant(query, found))
+            except Exception:
+                pass
+        if len(assets) < target_count:
+            try:
+                found = visual_source.fetch_noirlab_images_for_topic(query, count=target_count - len(assets))
                 _add_unique(semantic.filter_relevant(query, found))
             except Exception:
                 pass

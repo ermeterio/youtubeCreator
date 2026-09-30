@@ -6,9 +6,14 @@
 - NASA APOD (api.nasa.gov): precisa de chave gratuita (NASA_API_KEY), retorna
   a imagem do dia + uma explicação em texto que serve de base factual real
   para o roteiro - não é só imagem, é também fonte de conteúdo.
-- ESA/Hubble (esahubble.org/images/json/): endpoint JSON não documentado
-  oficialmente, mas público e funcional, sem chave. Licença CC BY 4.0 (uso
-  comercial ok, exige crédito visível, não pode insinuar endosso da ESA).
+- ESA/Hubble (esahubble.org/images/json/), ESO (eso.org/public/images/json/)
+  e NOIRLab (noirlab.edu/public/images/json/): mesmo endpoint JSON não
+  documentado oficialmente (mesma plataforma de divulgação compartilhada
+  entre esses observatórios), público e funcional, sem chave. Licença CC BY
+  4.0 nas três (uso comercial ok, exige crédito visível, não pode insinuar
+  endosso do observatório). Confirmado por consulta real aos três endpoints
+  em 30/09/2026 - todos devolvem o mesmo formato (`formats_url.screen`,
+  `ID`, `Credit`, `Title`), então usam o mesmo código de busca.
 
 Não encontrei API pública equivalente (busca por palavra-chave, JSON) para
 outras agências espaciais (JAXA, ISRO, Roscosmos, CSA etc.) - se isso mudar,
@@ -18,6 +23,7 @@ Toda imagem baixada é registrada com seu crédito (obrigatório por licença),
 para ser exibido no vídeo/descrição.
 """
 
+import ast
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +36,8 @@ from pipeline.atomic_io import atomic_write_bytes
 NASA_IMAGES_SEARCH_URL = "https://images-api.nasa.gov/search"
 NASA_APOD_URL = "https://api.nasa.gov/planetary/apod"
 ESA_HUBBLE_SEARCH_URL = "https://esahubble.org/images/json/"
+ESO_SEARCH_URL = "https://www.eso.org/public/images/json/"
+NOIRLAB_SEARCH_URL = "https://noirlab.edu/public/images/json/"
 SPACEFLIGHT_NEWS_URL = "https://api.spaceflightnewsapi.net/v4/articles/"
 
 _RETRY_BACKOFF_SECONDS = (2, 8, 20)
@@ -100,18 +108,28 @@ def fetch_nasa_images_for_topic(topic: str, count: int = 6) -> list[VisualAsset]
 
 
 def _clean_esa_string(value: str) -> str:
-    """A API JSON do ESA/Hubble retorna alguns campos de texto como repr de
-    bytes Python (ex.: "b'ESA/Hubble'"). Remove esse envoltório quando presente."""
+    """A API JSON do ESA/Hubble/ESO/NOIRLab retorna alguns campos de texto
+    como repr de bytes Python (ex.: "b'NSF\\xe2\\x80\\x93DOE...'", um
+    travessão UTF-8 escapado dentro do repr) - usar ast.literal_eval pra
+    reconstruir os bytes de verdade e decodificar, em vez de só cortar o
+    "b'"/"'" (que deixava os \\xNN literais no crédito exibido)."""
     if isinstance(value, str) and value.startswith("b'") and value.endswith("'"):
-        return value[2:-1]
+        try:
+            return ast.literal_eval(value).decode("utf-8")
+        except (ValueError, SyntaxError, UnicodeDecodeError):
+            return value[2:-1]
     return value
 
 
-def fetch_esa_hubble_images_for_topic(query: str, count: int = 6) -> list[VisualAsset]:
+def _fetch_avm_images_for_topic(search_url: str, prefix: str, default_credit: str,
+                                 query: str, count: int = 6) -> list[VisualAsset]:
+    """Busca genérica nos observatórios que compartilham a mesma plataforma
+    de divulgação (ESA/Hubble, ESO, NOIRLab) - todos devolvem o mesmo formato
+    JSON, só muda a URL base e o crédito default."""
     response = _get_with_retry(
-        ESA_HUBBLE_SEARCH_URL,
+        search_url,
         params={"search": query},
-        timeout=30,
+        timeout=45,
     )
     items = response.json()[:count]
 
@@ -121,13 +139,25 @@ def fetch_esa_hubble_images_for_topic(query: str, count: int = 6) -> list[Visual
         image_id = item.get("ID")
         if not image_url or not image_id:
             continue
-        dest = config.IMAGE_CACHE_DIR / f"esahubble_{image_id}.jpg"
+        dest = config.IMAGE_CACHE_DIR / f"{prefix}_{image_id}.jpg"
         if not dest.exists():
             _download(image_url, dest)
-        credit = _clean_esa_string(item.get("Credit") or "ESA/Hubble")
+        credit = _clean_esa_string(item.get("Credit") or default_credit)
         title = _clean_esa_string(item.get("Title") or query)
         assets.append(VisualAsset(local_path=dest, credit=credit, title=title))
     return assets
+
+
+def fetch_esa_hubble_images_for_topic(query: str, count: int = 6) -> list[VisualAsset]:
+    return _fetch_avm_images_for_topic(ESA_HUBBLE_SEARCH_URL, "esahubble", "ESA/Hubble", query, count)
+
+
+def fetch_eso_images_for_topic(query: str, count: int = 6) -> list[VisualAsset]:
+    return _fetch_avm_images_for_topic(ESO_SEARCH_URL, "eso", "ESO", query, count)
+
+
+def fetch_noirlab_images_for_topic(query: str, count: int = 6) -> list[VisualAsset]:
+    return _fetch_avm_images_for_topic(NOIRLAB_SEARCH_URL, "noirlab", "NSF NOIRLab", query, count)
 
 
 def fetch_recent_space_news(limit: int = 10) -> list[dict]:
