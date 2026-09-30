@@ -115,6 +115,15 @@ _MIGRATION_COLUMNS = {
         "thumbnail_rotated_at": "TEXT",
         "quality_score": "INTEGER",
         "quality_breakdown": "TEXT",
+        # Distinto de `status` de propósito: aprovar só o Short não muda o
+        # `status` do vídeo longo (continua 'pending_review'), então esse
+        # vídeo nunca saía da revisão em lote mesmo já tendo algo publicado.
+        # `reviewed` é setado tanto por aprovar/rejeitar quanto por um botão
+        # manual "revisado" (pra tirar da fila sem aprovar/rejeitar nada
+        # ainda) - relatado como falha real: "quando enviado pro YouTube ali
+        # não é atualizado".
+        "reviewed": "INTEGER NOT NULL DEFAULT 0",
+        "reviewed_at": "TEXT",
     },
     "channels": {
         "series_primary": "TEXT NOT NULL DEFAULT 'Direto da Fonte'",

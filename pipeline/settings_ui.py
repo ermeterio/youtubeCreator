@@ -13,6 +13,7 @@ editar código/JSON na mão.
 import json
 import re
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, abort, redirect, render_template_string, request, send_file, url_for
@@ -1779,7 +1780,10 @@ def list_videos():
 def batch_review():
     catalog.init_db()
     channel_id = request.args.get("channel_id", type=int)
-    tracks = [t for t in catalog.list_tracks(channel_id=channel_id, limit=500) if t["status"] == "pending_review"]
+    tracks = [
+        t for t in catalog.list_tracks(channel_id=channel_id, limit=500)
+        if t["status"] == "pending_review" and not (t["reviewed"] if "reviewed" in t.keys() else False)
+    ]
     channel_map = {ch["id"]: ch["name"] for ch in channels.list_channels()}
 
     cards = ""
@@ -1816,6 +1820,10 @@ def batch_review():
             <form class="inline" method="post" action="{url_for('reject_video', track_id=t['id'])}">
               <input type="hidden" name="return_to" value="review">
               <button type="submit" class="secondary">Rejeitar</button>
+            </form>
+            <form class="inline" method="post" action="{url_for('mark_reviewed_route', track_id=t['id'])}">
+              <input type="hidden" name="return_to" value="review">
+              <button type="submit" class="secondary" title="Tira da revisão em lote sem aprovar nem rejeitar - pra cuidar depois">✅ Revisado</button>
             </form>
           </div>
         </div>
@@ -1984,6 +1992,7 @@ def video_detail(track_id: int):
     <p>{_status_badge(track['status'])} {_fact_check_badge(track['fact_check_flag'])} {feedback_badge} {ab_badge}
        <span class="badge inactive">canal: {channel['name']}</span>
        {f'<span class="badge inactive">série: {track["series"]}</span>' if track['series'] else ''}
+       {'<span class="badge ok">✅ revisado</span>' if track['status'] == 'pending_review' and (track["reviewed"] if "reviewed" in track.keys() else False) else ''}
     </p>
     {_quality_badges_inline(track)}
     {fact_check_note}
@@ -2114,6 +2123,14 @@ def _privacy_from_form() -> str:
     return value if value in _VALID_PRIVACY_STATUSES else "private"
 
 
+def _mark_reviewed(track_id: int) -> None:
+    """Marca o vídeo como revisado - some da revisão em lote a partir daqui.
+    Chamado tanto por aprovar/rejeitar (qualquer decisão já conta como
+    revisão) quanto pelo botão manual "Revisado" (pra tirar da fila sem
+    aprovar/rejeitar nada ainda)."""
+    catalog.update_track(track_id, reviewed=1, reviewed_at=datetime.now(timezone.utc).isoformat())
+
+
 @app.route("/videos/<int:track_id>/approve", methods=["POST"])
 def approve_video(track_id: int):
     privacy_status = _privacy_from_form()
@@ -2121,6 +2138,7 @@ def approve_video(track_id: int):
         track = catalog.get_track(track_id)
         video_id = orchestrator.approve_and_upload(track_id, privacy_status=privacy_status)
         catalog.log_approval_decision(track_id, track["channel_id"], "approved_video", track["quality_score"])
+        _mark_reviewed(track_id)
         _flash(
             f"Vídeo publicado ({_PRIVACY_LABELS[privacy_status]}): https://youtube.com/watch?v={video_id} "
             f"— pode levar alguns minutos pra aparecer no canal; confira em '▶️ No YouTube' no menu."
@@ -2137,6 +2155,7 @@ def approve_short(track_id: int):
         track = catalog.get_track(track_id)
         video_id = orchestrator.approve_and_upload_short(track_id, privacy_status=privacy_status)
         catalog.log_approval_decision(track_id, track["channel_id"], "approved_short", track["quality_score"])
+        _mark_reviewed(track_id)
         _flash(
             f"Short publicado ({_PRIVACY_LABELS[privacy_status]}): https://youtube.com/shorts/{video_id} "
             f"— pode levar alguns minutos pra aparecer no canal; confira em '▶️ No YouTube' no menu."
@@ -2151,7 +2170,19 @@ def reject_video(track_id: int):
     track = catalog.get_track(track_id)
     catalog.update_track(track_id, status="rejected")
     catalog.log_approval_decision(track_id, track["channel_id"], "rejected", track["quality_score"])
+    _mark_reviewed(track_id)
     _flash("Vídeo marcado como rejeitado - os arquivos continuam em data/output/ se quiser recuperar.")
+    return _return_after_action(track_id)
+
+
+@app.route("/videos/<int:track_id>/mark_reviewed", methods=["POST"])
+def mark_reviewed_route(track_id: int):
+    """Tira o vídeo da revisão em lote sem aprovar nem rejeitar nada - pra
+    quando o dono já olhou e decidiu cuidar dele depois individualmente, ou
+    só quer limpar a fila de um vídeo que já tratou de outro jeito (ex.:
+    aprovou só o Short)."""
+    _mark_reviewed(track_id)
+    _flash("Marcado como revisado - saiu da revisão em lote.")
     return _return_after_action(track_id)
 
 
