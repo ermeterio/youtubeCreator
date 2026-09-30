@@ -182,15 +182,23 @@ def _group_captions(boundaries: list[dict], max_words: int = CAPTION_MAX_WORDS,
 
 
 def _caption_clips(boundaries: list[dict], resolution: tuple[int, int],
-                    accent_color: tuple[int, int, int]):
+                    box_color: tuple[int, int, int]):
     w, h = resolution
     clips = []
     for cap in _group_captions(boundaries):
         cap_duration = max(cap["end"] - cap["start"], 0.05)
         clip = (
-            _safe_text_clip(cap["text"].upper(), config.FONT_CAPTION, int(h * 0.045),
+            # Caixa alta o tempo todo foi apontado como visualmente cansativo/
+            # gritado - texto em caixa normal (mesma capitalização do roteiro
+            # narrado) lê mais natural, como legenda de verdade em vez de
+            # "alerta". Fundo trocado de preto chapado pro tom saturado da
+            # paleta do vídeo (mesma cor de fundo do thumbnail/crédito -
+            # NÃO o par "accent" da paleta, que é branco/dourado e ficaria
+            # ilegível atrás de texto branco) com transparência mais leve,
+            # pra parecer uma legenda com identidade visual, não uma tarja.
+            _safe_text_clip(cap["text"], config.FONT_CAPTION, int(h * 0.045),
                             stroke_width=2, max_width=int(w * 0.9), color="white",
-                            stroke_color="black", bg_color=(0, 0, 0, 110))
+                            stroke_color="black", bg_color=box_color + (150,))
             .with_position(("center", 0.76), relative=True)
             .with_start(cap["start"])
             .with_duration(cap_duration)
@@ -288,7 +296,7 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
     layers = [sequence, title_clip]
     layers += _flash_clips(cut_times, resolution, bg_color)
     if captions:
-        layers += _caption_clips(captions, resolution, accent_color)
+        layers += _caption_clips(captions, resolution, bg_color)
     layers.append(_cta_clip(duration, resolution, bg_color, cta_text=cta_text))
 
     final = CompositeVideoClip(layers, size=(w, h)).subclipped(0, duration)

@@ -171,6 +171,47 @@ def clarity_review(script: str, niche: str = "ciência") -> str | None:
     return _split_at_marker(text, "RISCOS:")[1].strip()
 
 
+POLISH_TEMPLATE = """Você é um editor de texto especializado em preparar roteiros para narração em voz
+alta (texto-para-fala) de um canal de YouTube sobre {niche}. Revise o roteiro abaixo e devolva uma
+versão corrigida - sem mudar fatos, números, nomes próprios ou a ordem das ideias - só consertando:
+- erros de gramática, concordância verbal/nominal e pontuação
+- frases estranhas, longas demais ou com jeito de tradução automática (soam artificiais faladas em
+  voz alta)
+- palavras repetidas muito perto uma da outra
+- termos técnicos usados sem nenhuma explicação que um leigo entenderia
+
+NÃO adicione informação nova, NÃO resuma, NÃO mude o tamanho do roteiro de forma relevante. Se o
+roteiro já estiver bom, devolva ele exatamente como está, sem alterar nada.
+
+ROTEIRO ORIGINAL:
+---
+{script}
+---
+
+Responda EXATAMENTE neste formato, sem texto antes ou depois:
+ROTEIRO_REVISADO: <roteiro corrigido completo, pronto pra narração>
+"""
+
+
+def polish_script(script: str, niche: str = "ciência") -> str:
+    """Passada de revisão de texto feita pelo Llama ANTES do fact-check/
+    narração - ao contrário do clarity_review (que só SINALIZA problemas pro
+    revisor humano), essa aqui efetivamente corrige gramática, fluência e
+    naturalidade do texto pra narração. Guarda-corpo contra resposta
+    degenerada do LLM (vazia, ou com tamanho muito diferente do original,
+    sinal de que "comeu" ou inventou conteúdo): nesses casos mantém o
+    roteiro original sem risco. Se o Ollama não responder, também mantém o
+    original - é um reforço opcional, nunca bloqueia o pipeline."""
+    prompt = POLISH_TEMPLATE.format(script=script, niche=niche)
+    text = _call_ollama(prompt, timeout=90)
+    if not text or not _has_marker(text, "ROTEIRO_REVISADO:"):
+        return script
+    revised = _clean_llm_text(_split_at_marker(text, "ROTEIRO_REVISADO:")[1].strip())
+    if not revised or not (0.6 <= len(revised) / max(len(script), 1) <= 1.4):
+        return script
+    return revised
+
+
 REVIEW_TEMPLATE = """Você é o roteirista responsável por melhorar os próximos vídeos de um canal
 automatizado do YouTube sobre {niche}. O dono do canal revisou um vídeo já publicado/gerado e
 deixou uma observação sobre ele.
@@ -872,6 +913,11 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
             _generate_with_llm(topic, facts, angle, niche, feedback_section, language["llm_language_name"])
             or _fallback_script(topic, facts, language_code)
         )
+        # Revisão de texto (gramática/fluência/naturalidade) ANTES do
+        # fact-check, pra checar precisão sobre o texto que de fato vai ser
+        # narrado (a revisão não deve mudar fatos, mas se mudar algo por
+        # engano, é essa versão final que precisa ser validada).
+        generated["script"] = polish_script(generated["script"], niche)
         fact_check, fact_check_details = _fact_check(generated["script"], facts)
 
     # Um vídeo longo com uma imagem só fica monótono. Busca por várias
