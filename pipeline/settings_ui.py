@@ -761,8 +761,10 @@ def edit_channel(channel_id: int):
         )
 
         publish_panel = f"""
-        <div class="panel">
-          <h3 style="margin-top:0;">Publicação</h3>
+        <div class="panel" style="border-left:4px solid var(--accent, #6c5ce7);">
+          <h3 style="margin-top:0;">🔒 Padrões de publicação (só valem quando VOCÊ aprovar)</h3>
+          <p class="muted" style="margin-top:0;">Isso não publica nada sozinho - só pré-preenche estas opções
+          na tela de aprovação, pra quando você clicar em "Publicar" manualmente depois de revisar o vídeo.</p>
           <label for="default_privacy">Visibilidade padrão ao aprovar</label>
           <select name="default_privacy" id="default_privacy">
             <option value="private" {"selected" if default_privacy == "private" else ""}>🔒 Privado</option>
@@ -784,12 +786,20 @@ def edit_channel(channel_id: int):
         """
 
         body = header + f"""
+        <div class="panel" style="background:#fff8e1; border-left:4px solid #f5a623;">
+          <p style="margin:0;">⚠️ <b>A geração automática nunca publica sozinha.</b> Todo dia habilitado abaixo
+          só cria um <b>rascunho</b> (status "aguardando revisão"). O vídeo só vai pro YouTube quando você
+          aprovar manualmente em <a href="{url_for('list_videos')}">Rascunhos</a> ou na
+          <a href="{url_for('batch_review')}">revisão em lote</a>.</p>
+        </div>
         <form method="post" action="{url_for('save_channel_schedule', channel_id=channel_id)}">
-          <h3 style="margin-top:0;">📅 Agenda semanal</h3>
+          <h3 style="margin-top:0;">📅 Agenda semanal (o que é gerado automaticamente)</h3>
           <p class="muted">Postagem consistente todos os dias - inclusive fim de semana - é o que mais
           influencia o crescimento do canal. Escolha por dia se o vídeo é gerado automaticamente e se
-          usa um tema específico ou o tema automático de sempre.</p>
+          usa um tema específico ou o tema automático de sempre. Isso só cria o rascunho - a publicação
+          é sempre uma etapa manual separada.</p>
           {day_panels}
+          <hr style="margin:28px 0; border:none; border-top:1px solid #ddd;">
           {publish_panel}
           <button type="submit">Salvar agenda e parâmetros</button>
         </form>
