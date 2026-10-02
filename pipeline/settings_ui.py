@@ -1835,7 +1835,11 @@ def _privacy_select(field_id: str = "privacy_status", selected: str = "private")
 def list_videos():
     catalog.init_db()
     channel_id = request.args.get("channel_id", type=int)
-    tracks = catalog.list_tracks(channel_id=channel_id)
+    all_tracks = catalog.list_tracks(channel_id=channel_id)
+    # Lista só o que ainda precisa de decisão - assim que aceito (publicado)
+    # ou rejeitado, o status muda e o vídeo sai desta listagem sozinho no
+    # próximo load, sem precisar de nenhum filtro manual.
+    tracks = [t for t in all_tracks if t["status"] == "pending_review"]
     channel_map = {ch["id"]: ch["name"] for ch in channels.list_channels()}
 
     filter_options = "".join(
@@ -1845,16 +1849,6 @@ def list_videos():
 
     rows = ""
     for t in tracks:
-        publish_action = ""
-        if t["status"] == "pending_review":
-            publish_action = f"""
-            <form class="inline" method="post" action="{url_for('approve_video', track_id=t['id'])}"
-                  style="display:inline-flex; align-items:center; gap:4px;">
-              <input type="hidden" name="return_to" value="list">
-              <button type="submit" style="padding:4px 10px; font-size:0.82rem;">📤 Publicar</button>
-              {_privacy_select(f'privacy_video_row_{t["id"]}')}
-            </form>
-            """
         rows += f"""
         <tr>
           <td>{t['id']}</td>
@@ -1863,11 +1857,23 @@ def list_videos():
           <td>{_status_badge(t['status'])}</td>
           <td>{_fact_check_badge(t['fact_check_flag'])}</td>
           <td class="muted">{t['created_at'][:16].replace('T', ' ')}</td>
-          <td>{publish_action}</td>
+          <td style="white-space:nowrap;">
+            <form class="inline" method="post" action="{url_for('approve_video', track_id=t['id'])}"
+                  style="display:inline-flex; align-items:center; gap:4px;">
+              <input type="hidden" name="return_to" value="list">
+              <button type="submit" style="padding:4px 10px; font-size:0.82rem;">✅ Aceitar e publicar</button>
+              {_privacy_select(f'privacy_video_row_{t["id"]}')}
+            </form>
+            <form class="inline" method="post" action="{url_for('reject_video', track_id=t['id'])}"
+                  style="display:inline-flex; align-items:center;">
+              <input type="hidden" name="return_to" value="list">
+              <button type="submit" class="secondary" style="padding:4px 10px; font-size:0.82rem;">❌ Rejeitar</button>
+            </form>
+          </td>
         </tr>
         """
 
-    pending_count = sum(1 for t in tracks if t["status"] == "pending_review")
+    pending_count = len(tracks)
     batch_cta = (
         f'<a class="btn" href="{url_for("batch_review")}">⚡ Revisão em lote ({pending_count} aguardando)</a>'
         if pending_count else ""
@@ -1875,9 +1881,9 @@ def list_videos():
 
     body = f"""
     <h2>📝 Rascunhos</h2>
-    <p class="muted">Vídeos gerados pelo pipeline, aguardando sua decisão de aprovar/rejeitar. Isto NÃO
-    é o inventário do seu canal no YouTube - pra ver o que já está publicado de verdade, use
-    "▶️ No YouTube" no menu acima.</p>
+    <p class="muted">Vídeos gerados pelo pipeline, aguardando sua decisão de aprovar/rejeitar - some desta
+    lista sozinho assim que aceito ou rejeitado. Isto NÃO é o inventário do seu canal no YouTube - pra ver
+    o que já está publicado de verdade, use "▶️ No YouTube" no menu acima.</p>
     <p>{batch_cta}</p>
     <form method="get" style="margin-bottom: 1rem;">
       <label style="display:inline;">Filtrar por canal:</label>
@@ -1888,7 +1894,7 @@ def list_videos():
     </form>
     <table>
       <tr><th>ID</th><th>Canal</th><th>Título</th><th>Status</th><th>Fact-check</th><th>Criado</th><th>Ação</th></tr>
-      {rows or '<tr><td colspan="7">Nenhum vídeo gerado ainda.</td></tr>'}
+      {rows or '<tr><td colspan="7">Nada aguardando revisão no momento.</td></tr>'}
     </table>
     """
     return _render(body, active_nav="videos")

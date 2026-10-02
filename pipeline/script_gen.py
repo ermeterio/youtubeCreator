@@ -854,7 +854,8 @@ def _source_rotation(channel: sqlite3.Row) -> dict:
     return {"topic": topic, "image_query": image_query, "facts": facts, "assets": [], "has_source": False}
 
 
-def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | None = None) -> dict:
+def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | None = None,
+                        _exclude_topics: set[str] | None = None, _is_retry: bool = False) -> dict:
     """Retorna {"title", "script", "topic", "visual_assets", "fact_check"}.
 
     `topic` é o rótulo em português usado no roteiro. `image_query` (interno)
@@ -869,12 +870,29 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     factual do dia pra checar (mesma limitação honesta do fallback de tema
     rotativo - o LLM escreve com conhecimento geral, fact-check fica
     "sem_fonte" em vez de "ok", o que é o sinal correto nesse caso).
+
+    `_exclude_topics`/`_is_retry` são uso interno (ver mais abaixo): quando a
+    geração automática (sem forced_topic do dono) não acha imagens REAIS o
+    bastante pro tema escolhido, troca pra outro tema da rotação em vez de
+    completar o vídeo com imagem genérica/sem relação - "não é permitido
+    criar vídeo com imagens genéricas" é uma regra do dono, não só uma
+    preferência. Um `forced_topic` vindo de pedido explícito do dono NUNCA
+    troca de tema sozinho (ele pediu aquele tema especificamente) - só falha
+    com um erro claro, pra ele decidir o que fazer.
     """
     api_key = channels.nasa_api_key_for(channel)
+    user_forced = forced_topic is not None and not _is_retry
 
     if forced_topic:
         topic, image_query = forced_topic
-        facts = f"(tema pedido manualmente pelo dono - sem explicação factual do dia; roteirista deve usar conhecimento geral confiável sobre {topic})"
+        if _is_retry:
+            facts = (
+                f"(tema alternativo escolhido automaticamente - o tema anterior não teve imagens reais "
+                f"suficientes - sem explicação factual do dia; roteirista deve usar conhecimento geral "
+                f"confiável sobre {topic})"
+            )
+        else:
+            facts = f"(tema pedido manualmente pelo dono - sem explicação factual do dia; roteirista deve usar conhecimento geral confiável sobre {topic})"
         assets = []
         apod = None
         series = channel["series_fallback"]
@@ -931,6 +949,17 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     target_count = 6
     search_queries = list(dict.fromkeys((generated.get("image_keywords") or []) + [image_query]))
 
+    # Âncora de relevância ESTÁVEL pro vídeo inteiro - usa o título específico
+    # que o LLM escreveu + um trecho dos fatos reais, em vez do termo de busca
+    # da iteração atual. Bug real encontrado: quando a APOD tem título
+    # genérico (ex.: "NASA Science"), ele também era usado como critério de
+    # relevância - então fotos de um evento de relações públicas da NASA
+    # ("NASA's Science Day on Capitol Hill") passavam o filtro por baterem
+    # com esse termo genérico, mesmo sem nenhuma relação com o que o vídeo
+    # realmente narra. Comparar contra o conteúdo real do vídeo (não contra
+    # o termo de busca que o achou) rejeita isso corretamente.
+    relevance_reference = f"{generated.get('title') or topic}. {facts[:300]}"
+
     def _add_unique(new_assets):
         for a in new_assets:
             if a.local_path not in seen_paths:
@@ -942,57 +971,60 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
             break
         try:
             found = visual_source.fetch_nasa_images_for_topic(query, count=target_count - len(assets))
-            _add_unique(semantic.filter_relevant(query, found))
+            _add_unique(semantic.filter_relevant(relevance_reference, found))
         except Exception:
             pass
         if len(assets) < target_count:
             try:
                 found = visual_source.fetch_esa_hubble_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant(query, found))
+                _add_unique(semantic.filter_relevant(relevance_reference, found))
             except Exception:
                 pass
         if len(assets) < target_count:
             try:
                 found = visual_source.fetch_eso_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant(query, found))
+                _add_unique(semantic.filter_relevant(relevance_reference, found))
             except Exception:
                 pass
         if len(assets) < target_count:
             try:
                 found = visual_source.fetch_noirlab_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant(query, found))
+                _add_unique(semantic.filter_relevant(relevance_reference, found))
             except Exception:
                 pass
 
-    # Termos genéricos de astronomia são o ÚLTIMO recurso - só entram se as
-    # palavras-chave específicas do tema não trouxerem imagens suficientes.
-    # Isso já causou um problema real (relatado pelo dono): busca específica
-    # falhou, caiu pro pool genérico embaralhado, e um termo genérico batido
-    # ao acaso trouxe imagem sem nenhuma relação com o que estava sendo
-    # narrado. Mitigação: prioriza, dentro do pool genérico, os termos que
-    # têm palavras em comum com o tema/keywords reais antes de sortear o
-    # resto - reduz a chance de pegar um termo genérico completamente
-    # desconectado do assunto do vídeo.
-    if len(assets) < target_count:
+    # Regra do dono: NUNCA completar o vídeo com imagem genérica/sem relação
+    # real ao tema - antes causava vídeos com fotos completamente
+    # desconectadas do que estava sendo narrado. Em vez de um pool genérico
+    # de último recurso, se a busca específica (keywords do roteiro + termo
+    # da APOD/notícia, em 4 fontes reais) não trouxe o mínimo de imagens
+    # relevantes, troca de tema (só quando o tema não foi pedido explicitamente
+    # pelo dono - ver docstring) e tenta de novo do zero, em vez de publicar
+    # algo sem relação.
+    MIN_REAL_IMAGES = 3
+    if len(assets) < MIN_REAL_IMAGES:
+        if user_forced:
+            raise RuntimeError(
+                f"Não encontrei imagens reais o bastante relacionadas a \"{topic}\" (achei só {len(assets)}, "
+                f"preciso de pelo menos {MIN_REAL_IMAGES}) - o pipeline não usa imagem genérica/sem relação "
+                "pra completar o vídeo. Tente outro tema ou termo de busca."
+            )
+        exclude = (_exclude_topics or set()) | {topic}
+        all_topics = channels.topics_for(channel)
+        candidates = [t for t in all_topics if t[0] not in exclude]
+        if not candidates:
+            raise RuntimeError(
+                f"Não encontrei imagens reais o bastante pra nenhum tema tentado hoje no canal "
+                f"'{channel['name']}' (tentados: {sorted(exclude)}) - pulando a geração hoje em vez de "
+                "publicar vídeo com imagem genérica/sem relação."
+            )
+        retry_topic = random.choice(candidates)
         notify.log(
-            f"[imagens] Busca específica não trouxe {target_count} imagens pra \"{topic}\" "
-            f"(queries: {search_queries}) - caindo pro pool genérico."
+            f"[{channel['name']}] \"{topic}\" não teve imagens específicas suficientes "
+            f"({len(assets)}/{MIN_REAL_IMAGES}) - trocando pro tema \"{retry_topic[0]}\" em vez de usar "
+            "imagem genérica/sem relação."
         )
-        topic_words = {w.lower() for q in search_queries for w in re.findall(r"[a-zA-Zà-úÀ-Ú]+", q)}
-        generic_pool = list(config.GENERIC_IMAGE_QUERIES)
-        random.shuffle(generic_pool)
-        generic_pool.sort(
-            key=lambda term: not (topic_words & {w.lower() for w in term.split()}),
-        )
-        relevance_reference = f"{topic} {' '.join(search_queries)}"
-        for query in generic_pool:
-            if len(assets) >= target_count:
-                break
-            try:
-                found = visual_source.fetch_nasa_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant(relevance_reference, found))
-            except Exception:
-                continue
+        return build_daily_script(channel, forced_topic=retry_topic, _exclude_topics=exclude, _is_retry=True)
 
     # Ordena por resolução (maior primeiro) para as imagens de melhor qualidade
     # aparecerem nos primeiros segundos do vídeo. A imagem da APOD é mantida
