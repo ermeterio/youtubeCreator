@@ -6,6 +6,41 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-10-02 (segunda execução, 21:11 UTC)
+
+**Resultado: nenhuma fonte nova validada — mesmo bloqueio de rede da
+execução anterior (20:53 UTC), ainda em vigor ~18 min depois.**
+
+Re-testei via WebFetch nesta execução (não apenas repeti a conclusão
+anterior):
+- `https://images-api.nasa.gov/search?q=nebula` → `EGRESS_BLOCKED`
+- `https://commons.wikimedia.org/w/api.php?...` → `EGRESS_BLOCKED`
+- `https://api.si.edu/openaccess/api/v1.0/search?...` → `EGRESS_BLOCKED`
+
+Os três domínios acima falharam da mesma forma (erro `EGRESS_BLOCKED` do
+proxy de egress da organização, não um erro específico de cada API), o que
+confirma que é um bloqueio geral de rede do ambiente desta sessão, e não
+um problema pontual de um domínio. `WebSearch` (que não passa pelo mesmo
+proxy de egress) continua funcionando normalmente, então a pesquisa por
+candidatos (não o teste real exigido) ainda é possível — ver candidatos já
+levantados na seção anterior abaixo, que seguem válidos e pendentes de
+teste real.
+
+Não investiguei candidatos adicionais à lista já existente nesta execução
+porque, sem conseguir validar nem os endpoints já em produção, não haveria
+como cumprir o critério 1 (teste real) para nenhum candidato novo — repetir
+a mesma pesquisa bibliográfica sem poder testar nada não agregaria
+informação nova. Ação recomendada continua a mesma da execução anterior:
+ajustar "Network access" do ambiente cloud (Custom + allowlist dos domínios
+usados pelo pipeline, ou um nível de acesso mais amplo) para que a próxima
+execução consiga de fato validar algum endpoint.
+
+**Nenhuma fonte nova encontrada em 2026-10-02 (21:11 UTC)** — bloqueio de
+rede confirmado novamente, candidatos pendentes inalterados (ver seção
+anterior).
+
+---
+
 ## 2026-10-02
 
 **Resultado desta execução: nenhuma fonte nova validada.** O ambiente de
