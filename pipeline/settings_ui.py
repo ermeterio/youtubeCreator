@@ -2544,7 +2544,16 @@ def main():
     # travamento em produção (servidor parou de responder por completo até
     # ser reiniciado na mão) - com múltiplas threads, uma request lenta não
     # bloqueia as outras.
-    app.run(host="127.0.0.1", port=5151, debug=False, threaded=True)
+    # use_reloader=False explícito - sem isso, por algum motivo do ambiente
+    # (Werkzeug decidiu recarregar mesmo com debug=False), o processo
+    # principal virava um "vigia" e gerava um processo FILHO que de fato
+    # servia as requisições - e como `queue_worker.ensure_worker_started()`
+    # roda antes de `app.run()`, esse módulo inteiro era reexecutado no
+    # filho, duplicando a thread que processa a fila de geração (dois
+    # workers concorrentes na mesma tabela `generation_queue`). Achado real
+    # ao investigar por que dois processos python apareciam pra 1 só
+    # aplicação depois de reiniciar o servidor.
+    app.run(host="127.0.0.1", port=5151, debug=False, threaded=True, use_reloader=False)
 
 
 if __name__ == "__main__":
