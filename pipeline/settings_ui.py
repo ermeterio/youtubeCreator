@@ -24,6 +24,11 @@ from pipeline import atomic_io, catalog, channels, notify, orchestrator, reports
 app = Flask(__name__)
 
 _authorize_status: dict[int, str] = {}
+# Link de autorização capturado no momento em que o Google o gera - exibido
+# como botão clicável na interface pra quando o "abrir navegador automático"
+# falha silenciosamente (relatado como não funcionando em Edge nem Firefox
+# nesta máquina - ver youtube_upload._get_credentials).
+_authorize_url: dict[int, str] = {}
 _generation_status: dict[int, str] = {}
 _consult_status: dict[int, str] = {}
 _comment_suggestions: dict[str, str] = {}
@@ -593,6 +598,13 @@ CREDENTIALS_FORM = """
   </button>
 </form>
 <p class="muted">{{ authorize_status }}</p>
+{% if authorize_url %}
+<div class="panel accent">
+  <p><b>O navegador não abriu sozinho?</b> Clique no link abaixo pra autorizar manualmente -
+  funciona sempre, independente do motivo do "abrir automático" ter falhado.</p>
+  <a class="btn" href="{{ authorize_url }}" target="_blank" rel="noopener">🔗 Abrir página de autorização do Google</a>
+</div>
+{% endif %}
 <p class="muted">Vídeos publicados, comentários e métricas ficam nos botões no topo desta página,
 não aqui embaixo - esta seção é só sobre a CONEXÃO OAuth em si.</p>
 """
@@ -664,6 +676,7 @@ def edit_channel(channel_id: int):
             CREDENTIALS_FORM, ch=ch, existing_secret=existing_secret,
             has_secret=_is_valid_oauth_secret(ch["slug"]),
             authorize_status=_authorize_status.get(channel_id, ""),
+            authorize_url=_authorize_url.get(channel_id, ""),
             duplicate_warning=duplicate_warning,
         )
         return _render(body)
@@ -850,9 +863,19 @@ def _run_authorization(channel_id: int, force_new: bool) -> None:
     try:
         ch = channels.get_channel(channel_id)
         _authorize_status[channel_id] = "Aguardando login no navegador..."
+        _authorize_url.pop(channel_id, None)
+
+        def _on_auth_url(url: str) -> None:
+            _authorize_url[channel_id] = url
+            _authorize_status[channel_id] = (
+                "Link de autorização pronto - se o navegador não abriu sozinho, use o botão abaixo."
+            )
+
         info = youtube_upload.authorize_and_identify(
-            channels.client_secret_path(ch["slug"]), channels.token_path(ch["slug"]), force_new=force_new
+            channels.client_secret_path(ch["slug"]), channels.token_path(ch["slug"]), force_new=force_new,
+            on_auth_url=_on_auth_url,
         )
+        _authorize_url.pop(channel_id, None)
         if info:
             channels.set_connected_channel_info(channel_id, info)
             _authorize_status[channel_id] = f"Autorizado com sucesso - conectado ao canal \"{info['title']}\"."
@@ -869,8 +892,9 @@ def _run_authorization(channel_id: int, force_new: bool) -> None:
 def authorize_channel(channel_id: int):
     threading.Thread(target=_run_authorization, args=(channel_id, False), daemon=True).start()
     _flash(
-        "Autorização iniciada - uma janela do navegador deve abrir. Se a conta gerenciar mais de um "
-        "canal, o Google vai perguntar QUAL usar - escolha com atenção. Atualize a página em alguns segundos."
+        "Autorização iniciada - uma janela do navegador deve abrir sozinha. Atualize a página em "
+        "alguns segundos: se não abrir nada, vai aparecer um botão de link manual aqui mesmo. Se a "
+        "conta gerenciar mais de um canal, o Google vai perguntar QUAL usar - escolha com atenção."
     )
     return redirect(url_for("edit_channel", channel_id=channel_id, tab="youtube"))
 
@@ -881,7 +905,8 @@ def reconnect_channel(channel_id: int):
     threading.Thread(target=_run_authorization, args=(channel_id, True), daemon=True).start()
     _flash(
         "Desconectado. Nova autorização iniciada com a tela de escolha de conta/canal forçada a "
-        "aparecer de novo - escolha o canal certo no navegador que abrir."
+        "aparecer de novo. Atualize a página em alguns segundos: se o navegador não abrir sozinho, "
+        "vai aparecer um botão de link manual aqui mesmo."
     )
     return redirect(url_for("edit_channel", channel_id=channel_id, tab="youtube"))
 

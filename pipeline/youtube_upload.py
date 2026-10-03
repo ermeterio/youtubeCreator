@@ -24,7 +24,9 @@ em todo vídeo publicado, conforme a política de rotulagem do YouTube.
 """
 
 import time
+import webbrowser
 from pathlib import Path
+from typing import Callable
 
 import google.auth.transport.requests
 from google.oauth2.credentials import Credentials
@@ -49,7 +51,8 @@ def _has_required_scopes(creds: Credentials) -> bool:
     return set(config.YOUTUBE_UPLOAD_SCOPES).issubset(granted)
 
 
-def _get_credentials(client_secret_path: Path, token_path: Path, force_new: bool = False) -> Credentials:
+def _get_credentials(client_secret_path: Path, token_path: Path, force_new: bool = False,
+                      on_auth_url: Callable[[str], None] | None = None) -> Credentials:
     creds = None
     if not force_new and token_path.exists():
         creds = Credentials.from_authorized_user_file(
@@ -97,7 +100,39 @@ def _get_credentials(client_secret_path: Path, token_path: Path, force_new: bool
             # no canal pessoal errado quando o dono está tentando trocar pra um
             # Brand Account diferente.
             extra_kwargs = {"prompt": "select_account consent"} if force_new else {}
-            creds = flow.run_local_server(port=0, **extra_kwargs)
+
+            # O navegador não abrir sozinho foi relatado como falha real (sem
+            # exceção, só fica esperando o login que nunca acontece
+            # visualmente) em mais de um navegador nesta máquina. run_local_server
+            # (biblioteca google_auth_oauthlib) chama especificamente
+            # `webbrowser.get(browser).open(url, ...)` - NÃO `webbrowser.open(...)`
+            # direto (confirmado lendo o código-fonte da lib) - então o patch
+            # precisa interceptar `webbrowser.get`, não `webbrowser.open`, pra
+            # capturar a URL antes da tentativa de abrir, e repassar pro
+            # chamador (on_auth_url) exibir como link clicável na interface -
+            # funciona sempre, mesmo quando o abrir automático falha
+            # silenciosamente por qualquer motivo do ambiente.
+            if on_auth_url:
+                original_get = webbrowser.get
+
+                class _CapturingBrowser:
+                    def open(self, url, *args, **kwargs):
+                        try:
+                            on_auth_url(url)
+                        except Exception:
+                            pass
+                        try:
+                            return original_get().open(url, *args, **kwargs)
+                        except Exception:
+                            return False
+
+                webbrowser.get = lambda *a, **k: _CapturingBrowser()
+                try:
+                    creds = flow.run_local_server(port=0, **extra_kwargs)
+                finally:
+                    webbrowser.get = original_get
+            else:
+                creds = flow.run_local_server(port=0, **extra_kwargs)
 
         atomic_io.atomic_write_text(token_path, creds.to_json())
 
@@ -245,7 +280,8 @@ def get_channel_info(client_secret_path: Path, token_path: Path) -> dict:
     }
 
 
-def authorize_and_identify(client_secret_path: Path, token_path: Path, force_new: bool = False) -> dict:
+def authorize_and_identify(client_secret_path: Path, token_path: Path, force_new: bool = False,
+                            on_auth_url: Callable[[str], None] | None = None) -> dict:
     """Autoriza (abrindo o navegador se preciso) e IMEDIATAMENTE consulta qual
     canal real do YouTube ficou conectado, pra confirmação visível na
     interface - em vez de salvar o token silenciosamente e só descobrir
@@ -253,8 +289,12 @@ def authorize_and_identify(client_secret_path: Path, token_path: Path, force_new
     o seletor de conta/canal do Google aparece durante o login, mas é fácil
     clicar sem querer no canal pessoal em destaque em vez do Brand Account
     desejado). `force_new=True` ignora qualquer token salvo e força a tela de
-    escolha de conta/canal a aparecer de novo (prompt=select_account)."""
-    creds = _get_credentials(client_secret_path, token_path, force_new=force_new)
+    escolha de conta/canal a aparecer de novo (prompt=select_account).
+    `on_auth_url` (opcional) recebe o link de autorização assim que ele é
+    gerado - ver _get_credentials: o abrir automático do navegador já foi
+    relatado como falhando silenciosamente nesta máquina, então o chamador
+    pode usar isso pra mostrar o link como botão clicável na interface."""
+    creds = _get_credentials(client_secret_path, token_path, force_new=force_new, on_auth_url=on_auth_url)
     youtube = build("youtube", "v3", credentials=creds)
     response = youtube.channels().list(part="snippet,statistics", mine=True).execute()
     items = response.get("items", [])
