@@ -635,7 +635,7 @@ def suggest_topics(channel: sqlite3.Row, count: int = 8) -> list[tuple[str, str]
         return []
 
     block = _split_at_marker(text, "SUGESTOES:")[1]
-    suggestions = []
+    raw_suggestions = []
     for line in block.strip().splitlines():
         line = line.strip()
         if "|" not in line:
@@ -643,8 +643,32 @@ def suggest_topics(channel: sqlite3.Row, count: int = 8) -> list[tuple[str, str]
         label, query = line.split("|", 1)
         label, query = _clean_item(label), _clean_item(query)
         if label and query:
-            suggestions.append((label, query))
-    return suggestions[:count]
+            raw_suggestions.append((label, query))
+
+    # Regra do dono: tema sugerido só entra na lista se achar imagem REAL
+    # correlata ao assunto (mesma busca de 4 fontes + verificação visual CLIP
+    # usada na geração do vídeo em si) - senão é descartado aqui, antes de
+    # chegar a ser oferecido. Evita convidar o dono a pedir um vídeo sobre um
+    # tema bonito no papel mas sem nenhuma imagem real pra ilustrar (caso
+    # real: "Mistérios das Galáxias Desaparecidas" - tema inventado, sem
+    # cobertura de imagem específica, só achava foto genérica/institucional).
+    MIN_SUGGESTION_IMAGES = 3
+    validated = []
+    for label, query in raw_suggestions:
+        if len(validated) >= count:
+            break
+        try:
+            found = _search_relevant_images([query], query, target_count=MIN_SUGGESTION_IMAGES)
+        except Exception:
+            found = []
+        if len(found) >= MIN_SUGGESTION_IMAGES:
+            validated.append((label, query))
+        else:
+            notify.log(
+                f"[{channel['name']}] Sugestão de tema descartada por falta de imagem real: "
+                f"\"{label}\" (achou só {len(found)}/{MIN_SUGGESTION_IMAGES} pra \"{query}\")."
+            )
+    return validated
 
 
 def _generate_with_llm(topic: str, facts: str, angle: str, niche: str, feedback_section: str,
@@ -859,6 +883,44 @@ def _source_rotation(channel: sqlite3.Row) -> dict:
     return {"topic": topic, "image_query": image_query, "facts": facts, "assets": [], "has_source": False}
 
 
+def _search_relevant_images(search_queries: list[str], relevance_reference: str,
+                             target_count: int = 6, seen_paths: set | None = None) -> list:
+    """Busca imagens reais (NASA + ESA/Hubble + ESO + NOIRLab) pros termos em
+    `search_queries` e mantém só as que o CLIP confirma serem visualmente
+    relacionadas a `relevance_reference` (ambos sempre em inglês - ver
+    comentário em build_daily_script sobre por quê). Extraído como função
+    própria pra ser reaproveitado tanto na geração do vídeo em si quanto na
+    validação de sugestão de tema (suggest_topics) - mesma régua nos dois
+    lugares, sem duplicar a lógica."""
+    assets: list = []
+    seen_paths = seen_paths if seen_paths is not None else set()
+
+    def _add_unique(new_assets):
+        for a in new_assets:
+            if a.local_path not in seen_paths:
+                assets.append(a)
+                seen_paths.add(a.local_path)
+
+    fetchers = [
+        visual_source.fetch_nasa_images_for_topic,
+        visual_source.fetch_esa_hubble_images_for_topic,
+        visual_source.fetch_eso_images_for_topic,
+        visual_source.fetch_noirlab_images_for_topic,
+    ]
+    for query in search_queries:
+        if len(assets) >= target_count:
+            break
+        for fetch in fetchers:
+            if len(assets) >= target_count:
+                break
+            try:
+                found = fetch(query, count=target_count - len(assets))
+                _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
+            except Exception:
+                continue
+    return assets
+
+
 def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | None = None,
                         _exclude_topics: set[str] | None = None, _is_retry: bool = False) -> dict:
     """Retorna {"title", "script", "topic", "visual_assets", "fact_check"}.
@@ -986,38 +1048,10 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     #    for só-inglês.
     relevance_reference = " ".join(search_queries) or (generated.get("title") or topic)
 
-    def _add_unique(new_assets):
-        for a in new_assets:
-            if a.local_path not in seen_paths:
-                assets.append(a)
-                seen_paths.add(a.local_path)
-
-    for query in search_queries:
-        if len(assets) >= target_count:
-            break
-        try:
-            found = visual_source.fetch_nasa_images_for_topic(query, count=target_count - len(assets))
-            _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
-        except Exception:
-            pass
-        if len(assets) < target_count:
-            try:
-                found = visual_source.fetch_esa_hubble_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
-            except Exception:
-                pass
-        if len(assets) < target_count:
-            try:
-                found = visual_source.fetch_eso_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
-            except Exception:
-                pass
-        if len(assets) < target_count:
-            try:
-                found = visual_source.fetch_noirlab_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
-            except Exception:
-                pass
+    found_assets = _search_relevant_images(
+        search_queries, relevance_reference, target_count=target_count - len(assets), seen_paths=seen_paths
+    )
+    assets.extend(found_assets)
 
     # Regra do dono: NUNCA completar o vídeo com imagem genérica/sem relação
     # real ao tema - antes causava vídeos com fotos completamente
