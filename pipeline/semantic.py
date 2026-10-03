@@ -21,12 +21,19 @@ import numpy as np
 import config
 
 _model = None
+_image_model = None
+_clip_text_model = None
 
 # Calibrado empiricamente (ver ROADMAP.md) comparando pares bons/ruins reais:
 # pares claramente errados (nebulosa vs foto de sonda sendo montada) ficaram
 # em ~0.55-0.60; pares relacionados de verdade ficaram em ~0.65-0.78. 0.60
 # é uma linha de corte conservadora - rejeita os casos claramente errados
 # sem descartar demais.
+#
+# USADO SÓ pra max_similarity/pairwise_high_similarity_fraction (comparação
+# TEXTO-vs-TEXTO em português, ex. título novo vs títulos recentes do canal -
+# aí não tem problema de idioma, os dois lados são sempre português). NÃO
+# USAR mais pra relevância de IMAGEM - ver filter_relevant_by_image abaixo.
 MIN_RELEVANCE_SCORE = 0.60
 
 
@@ -37,6 +44,93 @@ def _get_model():
         cache_dir = str(config.ASSETS_DIR / "embedding_model")
         _model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5", cache_dir=cache_dir)
     return _model
+
+
+# Verificação de relevância de imagem baseada no CONTEÚDO REAL da foto (CLIP,
+# via fastembed/ONNX - mesma filosofia leve/sem GPU do resto do módulo), não
+# só no título/metadado que a fonte (NASA/ESA/ESO/NOIRLab) publicou junto.
+#
+# Por que isso existe: a verificação antiga (`filter_relevant`, baseada só no
+# TÍTULO da imagem) deixou passar fotos institucionais completamente sem
+# relação com o vídeo - ex. "Meeting of Brazil Participation Group" e
+# "Autoridades en premiación" batendo com termos de busca genéricos o
+# bastante, ou com o modelo de texto (só-inglês) produzindo pontuação
+# essencialmente aleatória contra referência em português. Um filtro que só
+# lê texto nunca pode saber se a FOTO é mesmo de astronomia - só se a
+# LEGENDA parece ser. CLIP resolve isso de verdade: embeda os PIXELS da
+# imagem e o texto da busca no mesmo espaço vetorial, então a comparação é
+# contra o conteúdo visual real, não contra metadado que pode estar genérico,
+# impreciso ou em outro idioma.
+#
+# Threshold calibrado empiricamente (30/09-03/10/2026) com fotos reais que já
+# causaram o problema: as 3 fotos de reunião/premiação do caso relatado
+# ficaram entre 0.034 e 0.224; imagens reais de astronomia (Hubble/ESO,
+# temas variados) ficaram entre 0.211 e 0.30. 0.20 fica na folga entre os
+# dois grupos, com margem pros dois lados.
+MIN_VISUAL_RELEVANCE_SCORE = 0.20
+
+
+def _get_image_model():
+    global _image_model
+    if _image_model is None:
+        from fastembed import ImageEmbedding
+        cache_dir = str(config.ASSETS_DIR / "clip_model")
+        _image_model = ImageEmbedding("Qdrant/clip-ViT-B-32-vision", cache_dir=cache_dir)
+    return _image_model
+
+
+def _get_clip_text_model():
+    global _clip_text_model
+    if _clip_text_model is None:
+        from fastembed import TextEmbedding
+        cache_dir = str(config.ASSETS_DIR / "clip_model")
+        _clip_text_model = TextEmbedding("Qdrant/clip-ViT-B-32-text", cache_dir=cache_dir)
+    return _clip_text_model
+
+
+def filter_relevant_by_image(query_en: str, candidates: list, path_fn=lambda c: c.local_path,
+                              min_score: float = MIN_VISUAL_RELEVANCE_SCORE) -> list:
+    """Filtra `candidates` comparando o CONTEÚDO REAL de cada imagem (via
+    CLIP) contra `query_en` - SEMPRE em inglês (CLIP é majoritariamente
+    treinado em inglês; texto em português produz embedding ruim). Falha
+    aberta (retorna candidates sem filtrar) se o modelo não carregar - a
+    checagem é um reforço de qualidade, nunca pode travar a geração do vídeo
+    do dia por falta de internet pra baixar o modelo na 1ª vez, por exemplo."""
+    if not candidates:
+        return []
+    try:
+        img_model = _get_image_model()
+        txt_model = _get_clip_text_model()
+        paths = [str(path_fn(c)) for c in candidates]
+        img_vectors = list(img_model.embed(paths))
+        query_vec = list(txt_model.embed([query_en]))[0]
+    except Exception:
+        return candidates
+
+    kept = []
+    for candidate, vec in zip(candidates, img_vectors):
+        if _cosine(query_vec, vec) >= min_score:
+            kept.append(candidate)
+    return kept
+
+
+def average_visual_relevance(query_en: str, candidates: list, path_fn=lambda c: c.local_path) -> float | None:
+    """Equivalente a `average_relevance`, mas comparando o conteúdo real da
+    imagem (CLIP) em vez do título - usado pro sub-score de "relevância de
+    imagem" no resumo de qualidade (ver script_gen.compute_quality_score)."""
+    if not candidates:
+        return None
+    try:
+        img_model = _get_image_model()
+        txt_model = _get_clip_text_model()
+        paths = [str(path_fn(c)) for c in candidates]
+        img_vectors = list(img_model.embed(paths))
+        query_vec = list(txt_model.embed([query_en]))[0]
+    except Exception:
+        return None
+
+    scores = [_cosine(query_vec, vec) for vec in img_vectors]
+    return sum(scores) / len(scores)
 
 
 def _cosine(a, b) -> float:

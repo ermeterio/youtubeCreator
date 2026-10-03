@@ -142,7 +142,8 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
             recent_titles = [t for t in catalog.recent_titles(channel["id"], limit=20) if t != title]
             repetition_score = semantic.max_similarity(title, recent_titles)
             score, breakdown = script_gen.compute_quality_score(
-                fact_check, clarity, assets, topic, repetition_score=repetition_score
+                fact_check, clarity, assets, result.get("image_search_terms") or topic,
+                repetition_score=repetition_score
             )
             catalog.update_track(track_id, quality_score=score, quality_breakdown=breakdown)
         except Exception:

@@ -27,6 +27,11 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 OLLAMA_MODEL = "llama3.1"
 
+# Diacríticos que só aparecem em português (não em inglês) - usado pra
+# detectar quando o LLM devolve termo de busca/palavra-chave de imagem em
+# português apesar de instruído a responder em inglês (ver build_daily_script).
+_PT_DIACRITICS_RE = re.compile(r"[áàãâéêíóôõúçÁÀÃÂÉÊÍÓÔÕÚÇ]")
+
 
 def ollama_available() -> bool:
     """Checagem rápida (timeout curto) se o Ollama está de pé - usada pra
@@ -759,7 +764,7 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
                 break
             try:
                 found = visual_source.fetch_nasa_images_for_topic(kw, count=4 - len(assets))
-                _collect(semantic.filter_relevant(title, found))
+                _collect(semantic.filter_relevant_by_image(title, found))
             except Exception:
                 pass
         for kw in keywords:
@@ -767,7 +772,7 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
                 break
             try:
                 found = visual_source.fetch_esa_hubble_images_for_topic(kw, count=4 - len(assets))
-                _collect(semantic.filter_relevant(title, found))
+                _collect(semantic.filter_relevant_by_image(title, found))
             except Exception:
                 pass
         for kw in keywords:
@@ -775,7 +780,7 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
                 break
             try:
                 found = visual_source.fetch_eso_images_for_topic(kw, count=4 - len(assets))
-                _collect(semantic.filter_relevant(title, found))
+                _collect(semantic.filter_relevant_by_image(title, found))
             except Exception:
                 pass
         for kw in keywords:
@@ -783,7 +788,7 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
                 break
             try:
                 found = visual_source.fetch_noirlab_images_for_topic(kw, count=4 - len(assets))
-                _collect(semantic.filter_relevant(title, found))
+                _collect(semantic.filter_relevant_by_image(title, found))
             except Exception:
                 pass
         if len(assets) < 2:
@@ -947,18 +952,39 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     # narrado faz o vídeo perder sentido, mesmo com imagens bonitas.
     seen_paths = {asset.local_path for asset in assets}
     target_count = 6
-    search_queries = list(dict.fromkeys((generated.get("image_keywords") or []) + [image_query]))
+    # O LLM nem sempre obedece à instrução de responder as palavras-chave de
+    # imagem em inglês (bug real observado: termo veio em português mesmo
+    # pedindo inglês) - filtra qualquer termo com diacrítico claramente
+    # português (á, ã, ç, õ etc, que não aparecem em inglês) antes de usar
+    # pra buscar (a API da NASA/ESA é indexada em inglês - termo em
+    # português não acha nada mesmo) ou pra medir relevância (o modelo de
+    # embeddings só entende inglês de verdade - ver comentário abaixo).
+    raw_keywords = (generated.get("image_keywords") or []) + [image_query]
+    english_keywords = [k for k in raw_keywords if not _PT_DIACRITICS_RE.search(k)]
+    # Se TUDO tiver caído (até o image_query veio com acento), melhor buscar
+    # com o que tem do que não buscar nada - mas prioriza sempre os termos
+    # que parecem inglês primeiro.
+    search_queries = list(dict.fromkeys(english_keywords)) or list(dict.fromkeys(raw_keywords))
 
-    # Âncora de relevância ESTÁVEL pro vídeo inteiro - usa o título específico
-    # que o LLM escreveu + um trecho dos fatos reais, em vez do termo de busca
-    # da iteração atual. Bug real encontrado: quando a APOD tem título
-    # genérico (ex.: "NASA Science"), ele também era usado como critério de
-    # relevância - então fotos de um evento de relações públicas da NASA
-    # ("NASA's Science Day on Capitol Hill") passavam o filtro por baterem
-    # com esse termo genérico, mesmo sem nenhuma relação com o que o vídeo
-    # realmente narra. Comparar contra o conteúdo real do vídeo (não contra
-    # o termo de busca que o achou) rejeita isso corretamente.
-    relevance_reference = f"{generated.get('title') or topic}. {facts[:300]}"
+    # Âncora de relevância ESTÁVEL pro vídeo inteiro, EM INGLÊS - 2 bugs reais
+    # encontrados aqui, em sequência:
+    # 1) Comparar contra o termo de busca da iteração atual deixava passar
+    #    imagem sem relação real quando esse termo era genérico (ex.: título
+    #    de APOD "NASA Science" batendo com fotos de um evento de relações
+    #    públicas da NASA) - corrigido comparando contra o conteúdo real do
+    #    vídeo, não o termo que achou a imagem.
+    # 2) Esse "conteúdo real" estava em PORTUGUÊS (título/fatos do roteiro),
+    #    mas o modelo de embeddings usado (bge-small-en-v1.5) é SÓ EM INGLÊS -
+    #    a pontuação de relevância contra título de imagem em inglês virava
+    #    praticamente ruído (uma foto de "Meeting of Brazil Participation
+    #    Group" pontuou MAIS alto que "Hubble Deep Field" num caso real).
+    #    Testado e confirmado: usando as palavras-chave em inglês que o
+    #    próprio LLM já extrai pra busca (`search_queries`, sempre em inglês
+    #    por instrução do prompt) como referência, a separação fica nítida
+    #    (~0.5 pra foto irrelevante vs ~0.7-0.8 pra imagem real de
+    #    astronomia). NUNCA usar texto em português aqui enquanto o modelo
+    #    for só-inglês.
+    relevance_reference = " ".join(search_queries) or (generated.get("title") or topic)
 
     def _add_unique(new_assets):
         for a in new_assets:
@@ -971,25 +997,25 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
             break
         try:
             found = visual_source.fetch_nasa_images_for_topic(query, count=target_count - len(assets))
-            _add_unique(semantic.filter_relevant(relevance_reference, found))
+            _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
         except Exception:
             pass
         if len(assets) < target_count:
             try:
                 found = visual_source.fetch_esa_hubble_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant(relevance_reference, found))
+                _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
             except Exception:
                 pass
         if len(assets) < target_count:
             try:
                 found = visual_source.fetch_eso_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant(relevance_reference, found))
+                _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
             except Exception:
                 pass
         if len(assets) < target_count:
             try:
                 found = visual_source.fetch_noirlab_images_for_topic(query, count=target_count - len(assets))
-                _add_unique(semantic.filter_relevant(relevance_reference, found))
+                _add_unique(semantic.filter_relevant_by_image(relevance_reference, found))
             except Exception:
                 pass
 
@@ -1044,6 +1070,12 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         "fact_check": fact_check,
         "fact_check_details": fact_check_details,
         "series": series,
+        # Termos em inglês usados pra achar/filtrar as imagens - expostos pra
+        # quem for medir relevância de imagem (compute_quality_score) também
+        # comparar em inglês, pelo mesmo motivo do fix acima (modelo de
+        # embeddings é só-inglês; comparar com `topic` em português não
+        # funciona de verdade).
+        "image_search_terms": relevance_reference,
     }
 
 
@@ -1071,10 +1103,16 @@ def compute_quality_score(fact_check: str, clarity_review: str | None, assets: l
         notes.append("Clareza: 12/30 (revisão apontou trecho(s) confuso(s)/redundante(s))")
 
     image_points = 17  # neutro se não der pra medir (modelo indisponível, sem assets)
-    avg_relevance = semantic.average_relevance(topic, assets) if assets else None
+    avg_relevance = semantic.average_visual_relevance(topic, assets) if assets else None
     if avg_relevance is not None:
-        image_points = round(min(avg_relevance, 1.0) * 25)
-        notes.append(f"Imagens: {image_points}/25 (relevância média {avg_relevance:.2f})")
+        # Score de similaridade do CLIP (0-1 teórico, mas pares relacionados
+        # de verdade ficam numa faixa bem mais estreita que isso - calibrado
+        # empiricamente em 03/10/2026: ~0.03-0.19 pra imagem sem relação,
+        # ~0.21-0.35 pra imagem realmente relacionada). Remapeia linearmente
+        # esse intervalo pra 0-25 pontos em vez de usar a pontuação crua
+        # (que deixaria até imagem boa parecendo "nota baixa" pro revisor).
+        image_points = round(max(0.0, min((avg_relevance - 0.10) / 0.25, 1.0)) * 25)
+        notes.append(f"Imagens: {image_points}/25 (relevância visual média {avg_relevance:.2f})")
     else:
         notes.append(f"Imagens: {image_points}/25 (não foi possível medir)")
 
