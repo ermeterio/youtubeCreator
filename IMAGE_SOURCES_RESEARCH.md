@@ -6,6 +6,101 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-10-05 (quarta execução)
+
+**Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
+quarta execução consecutiva.**
+
+Testes reais desta execução (mesma metodologia das execuções anteriores:
+`WebFetch` e `Bash`/`curl` via proxy de egress, que é diferente do caminho
+usado pelo `WebSearch`):
+- `WebFetch` em `https://images-api.nasa.gov/search?q=nebula&media_type=image`
+  (fonte já em produção) → `EGRESS_BLOCKED`.
+- `WebFetch` em `https://commons.wikimedia.org/w/api.php?action=query&...`
+  (candidato pendente) → `EGRESS_BLOCKED`.
+- `curl --cacert /root/.ccr/ca-bundle.crt` para `images-api.nasa.gov` e
+  `api.si.edu` → `CONNECT tunnel failed, response 403`
+  (`connect_rejected (organization policy)`, confirmado em
+  `$HTTPS_PROXY/__agentproxy/status`).
+- `curl` para dois domínios adicionais testados nesta execução,
+  `www.sciencebase.gov` e `services.swpc.noaa.gov` (ver candidatos abaixo)
+  → mesmo erro `connect_rejected (organization policy)`. Ou seja, o
+  bloqueio continua sendo geral (política da organização, `selective:
+  false` no status do proxy), não uma lista de domínios liberados faltando
+  alguns nomes específicos.
+
+Como o teste real (critério 1) permanece impossível para qualquer domínio,
+usei `WebSearch` (que não passa pelo proxy de egress bloqueado) para
+**refinar dois candidatos já pendentes**, sem poder validá-los de verdade:
+
+### USGS ScienceBase (Astrogeology) — endpoint de busca agora confirmado por pesquisa (ainda não testado)
+- Execuções anteriores não tinham confirmado um endpoint de busca textual
+  equivalente ao `images-api.nasa.gov`. Pesquisa desta execução (WebSearch,
+  incluindo a documentação oficial `usgs.gov/sciencebase-instructions-and-
+  documentation/building-search-queries`) confirma que existe, de fato:
+  `https://www.sciencebase.gov/catalog/items?q=<query>&format=json`
+  (REST, sem chave, resultado JSON, parâmetros `max`/`offset` em
+  incrementos de 5, máximo de 1000 por página).
+- Licença: produtos de missões planetárias da USGS/Astrogeology são
+  domínio público (produto do governo dos EUA), na linha do que já é usado
+  para a NASA Images API.
+- Integração esperada (ainda sem poder confirmar o formato exato de um
+  item de imagem retornado, já que não consegui executar a chamada):
+  `fetch_usgs_astrogeology_images_for_topic(query, count)` fazendo GET no
+  endpoint acima, iterando os itens, extraindo a URL do arquivo/thumbnail
+  de cada item e montando `VisualAsset(local_path=..., credit="USGS
+  Astrogeology", title=item["title"])`.
+- **Segue pendente**: não é possível confirmar se a busca por palavra-chave
+  (`q=mars`/`q=moon`) retorna itens com URL de imagem direta e em volume
+  relevante, ou só metadados de dataset sem imagem anexada — isso só é
+  visível testando a chamada de verdade, o que o bloqueio de rede impediu
+  novamente.
+
+### NOAA SWPC (aurora) — candidato revisado, baixa prioridade
+- Pesquisa desta execução localizou o serviço real: Space Weather
+  Prediction Center, subdomínio `services.swpc.noaa.gov`, com imagens do
+  mapa de probabilidade de aurora (hemisfério norte/sul) geradas
+  periodicamente (ex. `.../images/aurora-forecast-northern-hemisphere.jpg`).
+- Diferença importante em relação aos outros candidatos: isso não é uma
+  fotografia real do fenômeno, e sim um **mapa/gráfico de previsão gerado
+  por modelo** (visualização de dados, não imagem de câmera/telescópio).
+  Rebaixa a relevância para o nicho do canal (o padrão do pipeline hoje é
+  sempre imagem real do fenômeno/objeto, não infográfico de previsão).
+- Licença: dados e produtos da NOAA/SWPC são trabalho do governo dos EUA,
+  presumivelmente domínio público, mas não encontrei uma página de termos
+  de uso explícita para este produto específico nesta pesquisa.
+- Não encontrei nesta execução uma API da NOAA para **fotografias reais**
+  de aurora (ex. do observatório ou de satélite) — só o mapa de previsão.
+  **Mantido como candidato de baixa prioridade**, pendente de teste real e
+  de achar (se existir) um acervo de fotos reais da NOAA, não só o mapa de
+  previsão.
+
+Candidatos ainda pendentes de teste real, sem mudança nesta execução:
+Wikimedia Commons API (filtro de licença por item) e Smithsonian Open
+Access API (`api.si.edu/openaccess`, CC0, chave gratuita via
+api.data.gov — reconfirmado por pesquisa nesta execução, mesmos detalhes
+já registrados nas execuções anteriores).
+
+Ação recomendada continua a mesma, agora com mais urgência (4 execuções
+seguidas sem conseguir validar nada de verdade por bloqueio de rede): mudar
+"Network access" do ambiente cloud desta rotina para incluir pelo menos os
+domínios já usados em produção (`images-api.nasa.gov`, `api.nasa.gov`,
+`esahubble.org`, `eso.org`, `noirlab.edu`, `api.spaceflightnewsapi.net`)
+mais os domínios dos candidatos pendentes (`commons.wikimedia.org`,
+`api.si.edu`, `www.sciencebase.gov`), ou um nível de acesso mais amplo.
+Sem isso, esta rotina continuará apenas revisando bibliografia via
+`WebSearch`, sem conseguir cumprir o critério de teste real pedido.
+
+**Nenhuma fonte nova encontrada em 2026-10-05** — bloqueio de rede
+confirmado pela quarta vez consecutiva (agora também testado em dois
+domínios adicionais, `sciencebase.gov` e `swpc.noaa.gov`, com o mesmo
+resultado `connect_rejected (organization policy)`); avanço desta execução
+foi só bibliográfico: endpoint de busca do USGS ScienceBase confirmado por
+pesquisa (antes não localizado) e candidato NOAA/aurora revisado e
+rebaixado por não ser fotografia real do fenômeno.
+
+---
+
 ## 2026-10-02 (terceira execução, 21:46 UTC)
 
 **Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
