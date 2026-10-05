@@ -21,7 +21,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import config
-from pipeline import atomic_io, audio_post, backup, catalog, channels, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
+from pipeline import atomic_io, audio_post, backup, catalog, channels, music, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
 
 # Status em que o track já passou por roteiro+imagens+narração (a parte cara:
 # chamadas ao Ollama, busca de imagem, TTS) mas ainda não terminou a
@@ -81,14 +81,17 @@ def _build_tags(channel, track) -> list[str]:
     return unique_tags[:15]
 
 
-def _build_description(topic: str, script: str, credits: list[str]) -> str:
+def _build_description(topic: str, script: str, credits: list[str], music_credit: str | None = None) -> str:
     credit_line = ", ".join(sorted(set(credits))) or "NASA"
-    return (
+    description = (
         f"Vídeo original sobre {topic}, com narração e roteiro gerados com apoio de IA "
         f"a partir de dados públicos da NASA, com revisão humana antes da publicação.\n\n"
         f"Imagens: {credit_line}.\n\n"
         f"Conteúdo alterado/sintético: roteiro e narração gerados por inteligência artificial."
     )
+    if music_credit:
+        description += f"\n\nMúsica:\n{music_credit}"
+    return description
 
 
 def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, str] | None = None,
@@ -161,7 +164,24 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
             script, raw_narration_path, channel, voice=voice, rate=rate, pitch=pitch
         )
         audio_post.postprocess_audio(raw_narration_path, narration_path)
-        catalog.update_track(track_id, narration_path=str(narration_path), status="narration_ready")
+
+        # Trilha sonora de fundo com ducking automático (ver pipeline/music.py)
+        # - só muda algo se houver faixas locais baixadas (scripts/
+        # download_music.py); senão segue sem música, como sempre funcionou.
+        # Sobrescreve narration_path com a versão mixada, que é o que de fato
+        # vira a trilha de áudio do vídeo final.
+        music_credit = None
+        try:
+            narration_with_music_path = work_dir / "narration_with_music.mp3"
+            narration_path, music_credit = music.add_background_music(
+                narration_path, narration_with_music_path, topic, script
+            )
+        except Exception as exc:
+            notify.log(f"[{channel['name']}] Trilha sonora falhou (não bloqueia a geração): {exc}")
+
+        catalog.update_track(
+            track_id, narration_path=str(narration_path), status="narration_ready", music_attribution=music_credit
+        )
         # Guarda imagens+legendas em disco ANTES de montar vídeo - é a parte
         # cara (Ollama, busca de imagem, TTS) que não vale a pena regerar se
         # a montagem falhar no meio; a próxima execução retoma daqui.
@@ -265,7 +285,7 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
 
     channel = channels.get_channel(track["channel_id"])
     credits = track["image_credits"].split(", ") if track["image_credits"] else ["NASA"]
-    description = _build_description(track["topic"], track["script"], credits)
+    description = _build_description(track["topic"], track["script"], credits, track["music_attribution"] if "music_attribution" in track.keys() else None)
     tags = _build_tags(channel, track)
 
     video_id = youtube_upload.upload_video(
@@ -295,7 +315,7 @@ def approve_and_upload_short(track_id: int, privacy_status: str = "private") -> 
 
     channel = channels.get_channel(track["channel_id"])
     credits = track["image_credits"].split(", ") if track["image_credits"] else ["NASA"]
-    description = _build_description(track["topic"], track["script"], credits)
+    description = _build_description(track["topic"], track["script"], credits, track["music_attribution"] if "music_attribution" in track.keys() else None)
     tags = _build_tags(channel, track) + ["shorts"]
     short_title = track["title"] if "#shorts" in track["title"].lower() else f"{track['title']} #Shorts"
 

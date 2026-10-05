@@ -155,6 +155,43 @@ def _ken_burns_clip(asset: VisualAsset, duration: float, resolution: tuple[int, 
     return CompositeVideoClip([clip, credit], size=(w, h))
 
 
+def _video_clip_from_asset(asset: VisualAsset, duration: float, resolution: tuple[int, int],
+                            credit_color: tuple[int, int, int], credit_label: str = "Crédito"):
+    """Clipe de VÍDEO REAL (não Ken Burns sintético sobre foto parada) - cobre
+    o quadro inteiro (escala + corta o excesso, mesmo princípio do
+    _compose_canvas mas em vídeo) e corta um trecho do MEIO do clipe original
+    (evita abertura/fechamento em preto/logo que alguns clipes da NASA têm
+    nas pontas). Clipes da NASA chegam com ~1-2min, bem mais que os poucos
+    segundos usados aqui, então sobra trecho de sobra quase sempre."""
+    w, h = resolution
+    clip = VideoFileClip(str(asset.video_path)).without_audio()
+
+    if clip.duration <= duration:
+        # Raro (clipe mais curto que o trecho pedido) - repete o clipe
+        # inteiro quantas vezes precisar em vez de cortar, pra não sobrar
+        # tela parada/preta no fim.
+        loops = int(duration // clip.duration) + 1
+        clip = concatenate_videoclips([clip] * loops).subclipped(0, duration)
+    else:
+        start = (clip.duration - duration) / 2
+        clip = clip.subclipped(start, start + duration)
+
+    src_w, src_h = clip.size
+    scale = max(w / src_w, h / src_h)
+    clip = clip.resized(scale).cropped(width=w, height=h, x_center=clip.w / 2, y_center=clip.h / 2)
+    clip = clip.with_position(("center", "center"))
+
+    credit = (
+        _safe_text_clip(f"{credit_label}: {_short_credit(asset.credit)}", config.FONT_CREDIT, 28,
+                        stroke_width=1, color="white", stroke_color="black",
+                        bg_color=credit_color + (120,))
+        .with_position((0.02, 0.94), relative=True)
+        .with_duration(duration)
+    )
+
+    return CompositeVideoClip([clip, credit], size=(w, h))
+
+
 def _group_captions(boundaries: list[dict], max_words: int = CAPTION_MAX_WORDS,
                      max_chars: int = CAPTION_MAX_CHARS) -> list[dict]:
     """Agrupa os eventos WordBoundary do TTS em blocos curtos de legenda
@@ -269,8 +306,12 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
 
     clips = []
     for i, asset in enumerate(assets):
-        clip = _ken_burns_clip(asset, per_image_duration, resolution, zoom_in=(i % 2 == 0),
-                                credit_color=bg_color, credit_label=credit_label)
+        if asset.video_path:
+            clip = _video_clip_from_asset(asset, per_image_duration, resolution,
+                                           credit_color=bg_color, credit_label=credit_label)
+        else:
+            clip = _ken_burns_clip(asset, per_image_duration, resolution, zoom_in=(i % 2 == 0),
+                                    credit_color=bg_color, credit_label=credit_label)
         effects = []
         if i > 0:
             effects.append(CrossFadeIn(CROSSFADE_DURATION))

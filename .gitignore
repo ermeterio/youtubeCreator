@@ -12,6 +12,8 @@ data/catalog.db-wal
 data/catalog.db-shm
 data/output/
 data/assets/nasa_cache/
+data/assets/nasa_video_cache/
+data/assets/music/
 data/assets/embedding_model/
 data/assets/clip_model/
 data/assets/voice_previews/

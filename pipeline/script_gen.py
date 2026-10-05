@@ -1064,6 +1064,25 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     )
     assets.extend(found_assets)
 
+    # Vídeo real (não Ken Burns sintético) como complemento ocasional - só 1
+    # por vídeo, de propósito ("usar com moderação": muito vídeo real
+    # brigaria visualmente com as fotos e pesaria o tempo de download/render
+    # da geração diária). Tentado só pelo termo de busca mais específico
+    # (primeiro de search_queries), com o MESMO filtro de relevância visual
+    # (CLIP) que as fotos já passam - ver semantic.filter_relevant_by_image.
+    # Falha aberta: se não achar nada relevante, segue só com fotos, como
+    # sempre funcionou.
+    try:
+        video_candidates = visual_source.fetch_nasa_videos_for_topic(search_queries[0], count=2)
+        relevant_videos = [
+            v for v in semantic.filter_relevant_by_image(relevance_reference, video_candidates)
+            if v.local_path not in seen_paths
+        ]
+        if relevant_videos:
+            assets.append(relevant_videos[0])
+    except Exception:
+        pass
+
     # Regra do dono: NUNCA completar o vídeo com imagem genérica/sem relação
     # real ao tema - antes causava vídeos com fotos completamente
     # desconectadas do que estava sendo narrado. Em vez de um pool genérico

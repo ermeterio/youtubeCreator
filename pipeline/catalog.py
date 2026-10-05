@@ -124,6 +124,12 @@ _MIGRATION_COLUMNS = {
         # não é atualizado".
         "reviewed": "INTEGER NOT NULL DEFAULT 0",
         "reviewed_at": "TEXT",
+        # Texto de atribuição da trilha sonora de fundo usada (ver
+        # pipeline/music.py) - exigido pela licença CC BY das faixas do
+        # Kevin MacLeod, precisa aparecer na descrição do vídeo publicado.
+        # Null quando nenhuma faixa local estava disponível (vídeo segue
+        # sem música, como sempre funcionou antes dessa funcionalidade).
+        "music_attribution": "TEXT",
     },
     "channels": {
         "series_primary": "TEXT NOT NULL DEFAULT 'Direto da Fonte'",

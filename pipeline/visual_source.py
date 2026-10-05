@@ -2,7 +2,10 @@
 
 - NASA Images API (images-api.nasa.gov): pública, sem chave, busca por
   palavra-chave. Uso: domínio público nos EUA (não usar para implicar endosso
-  da NASA, não usar o logo/insígnia oficial).
+  da NASA, não usar o logo/insígnia oficial). A mesma API também indexa VÍDEO
+  real (media_type="video") - clipes reais de telescópio/simulação, não só
+  fotos - usado como alternativa ocasional ao Ken Burns sintético pra elevar
+  a produção (ver fetch_nasa_videos_for_topic).
 - NASA APOD (api.nasa.gov): precisa de chave gratuita (NASA_API_KEY), retorna
   a imagem do dia + uma explicação em texto que serve de base factual real
   para o roteiro - não é só imagem, é também fonte de conteúdo.
@@ -65,6 +68,13 @@ class VisualAsset:
     local_path: Path
     credit: str
     title: str
+    # video_path preenchido só pra assets de VÍDEO real (ver
+    # fetch_nasa_videos_for_topic) - nesse caso, `local_path` aponta pra um
+    # FRAME extraído (usado pra checagem de relevância/tipo via CLIP, que só
+    # processa imagem) enquanto `video_path` aponta pro .mp4 de verdade, usado
+    # na montagem final (ver video_build._ken_burns_clip). Pra um asset de
+    # foto normal, fica None e tudo funciona como sempre funcionou.
+    video_path: Path | None = None
 
 
 def search_nasa_images(query: str, media_type: str = "image", limit: int = 8) -> list[dict]:
@@ -105,6 +115,64 @@ def fetch_nasa_images_for_topic(topic: str, count: int = 6) -> list[VisualAsset]
             _download(image_url, dest)
         assets.append(VisualAsset(local_path=dest, credit="NASA", title=title))
     return assets
+
+
+VIDEO_CACHE_DIR = config.ASSETS_DIR / "nasa_video_cache"
+
+
+def fetch_nasa_videos_for_topic(topic: str, count: int = 2) -> list[VisualAsset]:
+    """Vídeo real (não foto) da NASA Images API pro mesmo tema - usado como
+    alternativa ocasional ao Ken Burns sintético (ver video_build.py), pra
+    dar movimento de verdade em vez de só pan/zoom sobre foto parada.
+
+    Baixa o tier "medium" (~1280x720, no teste real feito em 05/10/2026) -
+    "large"/"orig" ficam grandes demais (75-175MB) pra baixar todo dia sem
+    necessidade, "small"/"mobile" ficam baixos demais de resolução pro vídeo
+    final em 1080p. Extrai um frame do meio do clipe como thumbnail - é o
+    que entra em `local_path` (usado só pra checagem de relevância/tipo via
+    CLIP, que não processa vídeo); o .mp4 de verdade fica em `video_path`,
+    usado na montagem final."""
+    items = search_nasa_images(topic, media_type="video", limit=count)
+    assets = []
+    for item in items:
+        data = item["data"][0]
+        nasa_id = data["nasa_id"]
+        title = data.get("title", topic)
+        try:
+            manifest = _get_with_retry(item["href"], timeout=30).json()
+        except Exception:
+            continue
+        video_url = next((u for u in manifest if u.lower().endswith("~medium.mp4")), None) or next(
+            (u for u in manifest if u.lower().endswith("~small.mp4")), None
+        )
+        if not video_url:
+            continue
+
+        safe_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in nasa_id)
+        video_dest = VIDEO_CACHE_DIR / f"{safe_id}.mp4"
+        thumb_dest = VIDEO_CACHE_DIR / f"{safe_id}_frame.jpg"
+        try:
+            if not video_dest.exists():
+                _download(video_url, video_dest)
+            if not thumb_dest.exists():
+                _extract_frame(video_dest, thumb_dest)
+        except Exception:
+            continue
+        assets.append(VisualAsset(local_path=thumb_dest, credit="NASA", title=title, video_path=video_dest))
+    return assets
+
+
+def _extract_frame(video_path: Path, dest: Path) -> Path:
+    """Frame do meio do vídeo (evita abertura/fechamento em preto que alguns
+    clipes têm no início/fim), salvo como jpg - usado só pra checagem de
+    relevância via CLIP (que processa imagem, não vídeo)."""
+    from moviepy import VideoFileClip
+    from PIL import Image
+
+    with VideoFileClip(str(video_path)) as clip:
+        frame = clip.get_frame(clip.duration / 2)
+    Image.fromarray(frame).convert("RGB").save(dest, "JPEG", quality=90)
+    return dest
 
 
 def _clean_esa_string(value: str) -> str:
