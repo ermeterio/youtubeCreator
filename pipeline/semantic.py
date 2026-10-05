@@ -88,14 +88,47 @@ def _get_clip_text_model():
     return _clip_text_model
 
 
+_PHOTO_REFERENCE = "a real photograph of outer space, a nebula, a galaxy, a planet, or a telescope image"
+_GRAPHIC_REFERENCE = "a logo, icon, flat vector graphic, emblem, insignia, or illustration"
+
+# Calibrado empiricamente (04/10/2026) com um caso real que escapou do filtro
+# de relevância de tema: a APOD de um dia veio sendo literalmente o LOGOTIPO
+# da NASA (não uma foto), e como "NASA" é tematicamente associado a
+# astronomia, ele passava na checagem de relevância normal (filter_relevant_
+# by_image) com folga. A diferença entre "parece foto real" e "parece
+# logo/gráfico" separa isso melhor: logo ficou em +0.018 (foto≈gráfico),
+# foto de reunião (outro caso ruim já visto) ficou em -0.005, fotos reais de
+# astronomia ficaram em +0.16 a +0.18. 0.10 fica na folga, com margem.
+MIN_PHOTO_VS_GRAPHIC_DIFF = 0.10
+
+
+def is_real_photo(path, min_diff: float = MIN_PHOTO_VS_GRAPHIC_DIFF) -> bool:
+    """Confirma que a imagem em `path` PARECE uma fotografia real (não um
+    logo/ícone/gráfico vetorial) - checagem de TIPO de conteúdo, diferente de
+    filter_relevant_by_image (que checa se o ASSUNTO bate com o tema do
+    vídeo). As duas são complementares: uma imagem pode ser tematicamente
+    "relacionada" a astronomia (ex.: o logo da NASA) sem ser uma foto de
+    verdade. Falha aberta (True) se o modelo não carregar."""
+    try:
+        img_model = _get_image_model()
+        txt_model = _get_clip_text_model()
+        img_vec = list(img_model.embed([str(path)]))[0]
+        photo_vec, graphic_vec = list(txt_model.embed([_PHOTO_REFERENCE, _GRAPHIC_REFERENCE]))
+    except Exception:
+        return True
+    return _cosine(photo_vec, img_vec) - _cosine(graphic_vec, img_vec) >= min_diff
+
+
 def filter_relevant_by_image(query_en: str, candidates: list, path_fn=lambda c: c.local_path,
                               min_score: float = MIN_VISUAL_RELEVANCE_SCORE) -> list:
     """Filtra `candidates` comparando o CONTEÚDO REAL de cada imagem (via
     CLIP) contra `query_en` - SEMPRE em inglês (CLIP é majoritariamente
-    treinado em inglês; texto em português produz embedding ruim). Falha
-    aberta (retorna candidates sem filtrar) se o modelo não carregar - a
-    checagem é um reforço de qualidade, nunca pode travar a geração do vídeo
-    do dia por falta de internet pra baixar o modelo na 1ª vez, por exemplo."""
+    treinado em inglês; texto em português produz embedding ruim) - e também
+    rejeita qualquer uma que pareça logo/gráfico em vez de foto real (ver
+    is_real_photo). Falha aberta (retorna candidates sem filtrar) se o
+    modelo não carregar - a checagem é um reforço de qualidade, nunca pode
+    travar a geração do vídeo do dia por falta de internet pra baixar o
+    modelo na 1ª vez, por exemplo."""
     if not candidates:
         return []
     try:
@@ -104,13 +137,17 @@ def filter_relevant_by_image(query_en: str, candidates: list, path_fn=lambda c: 
         paths = [str(path_fn(c)) for c in candidates]
         img_vectors = list(img_model.embed(paths))
         query_vec = list(txt_model.embed([query_en]))[0]
+        photo_vec, graphic_vec = list(txt_model.embed([_PHOTO_REFERENCE, _GRAPHIC_REFERENCE]))
     except Exception:
         return candidates
 
     kept = []
     for candidate, vec in zip(candidates, img_vectors):
-        if _cosine(query_vec, vec) >= min_score:
-            kept.append(candidate)
+        if _cosine(query_vec, vec) < min_score:
+            continue
+        if _cosine(photo_vec, vec) - _cosine(graphic_vec, vec) < MIN_PHOTO_VS_GRAPHIC_DIFF:
+            continue
+        kept.append(candidate)
     return kept
 
 

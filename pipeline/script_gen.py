@@ -856,9 +856,20 @@ def _source_apod(channel: sqlite3.Row, api_key: str) -> dict | None:
         return None
     if not (apod and apod["asset"] and len(apod["explanation"]) > 100):
         return None
+
+    # Bug real (relatado pelo dono, com print do vídeo): a "imagem do dia"
+    # da APOD às vezes é literalmente o LOGOTIPO da NASA, não uma foto -
+    # passava sem checagem nenhuma porque essa imagem nunca passava pelo
+    # filtro de relevância (só as imagens achadas por busca passavam). Se não
+    # parecer foto de verdade, não usa como âncora - o conteúdo factual
+    # (título/explicação) continua valendo normalmente, e a busca por
+    # palavra-chave mais abaixo acha uma foto real pro vídeo.
+    if not semantic.is_real_photo(apod["asset"].local_path):
+        apod = {**apod, "asset": None}
+
     return {
         "topic": apod["title"], "image_query": apod["title"], "facts": apod["explanation"],
-        "assets": [apod["asset"]], "has_source": True, "apod": apod,
+        "assets": [apod["asset"]] if apod["asset"] else [], "has_source": True, "apod": apod,
     }
 
 
