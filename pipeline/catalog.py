@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS series_playlists (
 # NOT EXISTS não afeta um banco já existente, então o init_db() migra bancos
 # antigos adicionando as colunas que faltarem.
 _MIGRATION_COLUMNS = {
+    "generation_queue": {
+        # Retry com backoff (ver pipeline/queue_worker.py) - distingue
+        # falha transitória (Ollama/rede momentaneamente fora) de falha
+        # permanente, prática validada (Gravitee/FlowFuse/Codemia: DLQ +
+        # backoff exponencial) em vez de "failed" definitivo na 1ª falha.
+        "attempts": "INTEGER NOT NULL DEFAULT 0",
+        "next_attempt_at": "TEXT",
+    },
     "tracks": {
         "video_vertical_path": "TEXT",
         "youtube_short_video_id": "TEXT",
@@ -379,9 +387,15 @@ def enqueue_topics(channel_id: int, topics: list[tuple[str, str]]) -> list[int]:
 
 
 def next_pending_queue_item() -> sqlite3.Row | None:
+    """Pega o próximo item 'pending' - pula item com retry agendado pro
+    futuro (next_attempt_at, ver queue_worker.py), respeitando o backoff
+    em vez de tentar de novo imediatamente numa falha transitória."""
     with get_conn() as conn:
         return conn.execute(
-            "SELECT * FROM generation_queue WHERE status = 'pending' ORDER BY id LIMIT 1"
+            "SELECT * FROM generation_queue WHERE status = 'pending' "
+            "AND (next_attempt_at IS NULL OR next_attempt_at <= ?) "
+            "ORDER BY id LIMIT 1",
+            (datetime.now(timezone.utc).isoformat(),),
         ).fetchone()
 
 

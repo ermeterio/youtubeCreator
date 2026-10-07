@@ -6,13 +6,24 @@ vídeo e narração já competem por CPU/GPU numa geração só - rodar várias 
 mesmo tempo derrubaria a máquina em vez de acelerar de verdade.
 """
 
+import random
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 from pipeline import catalog, channels, notify, orchestrator
 
 _worker_started = False
 _lock = threading.Lock()
+
+# Retry com backoff exponencial (+jitter) em vez de "failed" definitivo na
+# 1ª falha - prática validada (Gravitee/FlowFuse/Codemia: DLQ + backoff)
+# pra distinguir falha TRANSITÓRIA (Ollama/API momentaneamente fora,
+# timeout de rede) de falha permanente. Em minutos, não segundos - geração
+# de vídeo já leva minutos, não faz sentido tentar de novo em segundos.
+# Depois da última entrada aqui (3ª retentativa), desiste de vez.
+_BACKOFF_MINUTES = (2, 10, 30)
+_MAX_ATTEMPTS = len(_BACKOFF_MINUTES) + 1  # 1 tentativa inicial + 3 retries
 
 
 def _process_one(item) -> None:
@@ -32,8 +43,25 @@ def _process_one(item) -> None:
         catalog.update_queue_item(item["id"], status="done", track_id=track_id, finished_at=_now())
         notify.log(f"[{channel['name']}] Fila: vídeo sobre \"{item['topic_label']}\" pronto (track {track_id}).")
     except Exception as exc:
-        catalog.update_queue_item(item["id"], status="failed", error=str(exc), finished_at=_now())
-        notify.log(f"Fila: falhou ao gerar \"{item['topic_label']}\" (canal id {item['channel_id']}): {exc}")
+        attempts = (item["attempts"] if "attempts" in item.keys() and item["attempts"] else 0) + 1
+        if attempts < _MAX_ATTEMPTS:
+            base_minutes = _BACKOFF_MINUTES[attempts - 1]
+            delay_minutes = base_minutes + random.uniform(0, base_minutes * 0.2)  # jitter
+            next_attempt = datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)
+            catalog.update_queue_item(
+                item["id"], status="pending", attempts=attempts, error=str(exc),
+                next_attempt_at=next_attempt.isoformat(), started_at=None,
+            )
+            notify.log(
+                f"Fila: falha transitória ao gerar \"{item['topic_label']}\" "
+                f"(tentativa {attempts}/{_MAX_ATTEMPTS - 1}) - tenta de novo em ~{base_minutes}min: {exc}"
+            )
+        else:
+            catalog.update_queue_item(item["id"], status="failed", error=str(exc), finished_at=_now(), attempts=attempts)
+            notify.log(
+                f"Fila: falhou DEFINITIVAMENTE ao gerar \"{item['topic_label']}\" (canal id {item['channel_id']}) "
+                f"após {attempts} tentativas: {exc}"
+            )
 
 
 def _now() -> str:
