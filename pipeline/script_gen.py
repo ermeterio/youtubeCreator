@@ -344,6 +344,137 @@ def _order_by_luminosity_continuity(images: list) -> list:
     return ordered
 
 
+SEGMENT_KEYWORD_TEMPLATE = """Abaixo está um roteiro dividido em parágrafos numerados, e uma lista de
+termos de busca de imagem (em inglês) já extraídos dele.
+
+ROTEIRO (um parágrafo por linha numerada):
+{numbered_paragraphs}
+
+TERMOS DISPONÍVEIS: {keywords}
+
+Pra CADA parágrafo, diga qual termo da lista é mais específico/relevante pro que está sendo narrado
+NAQUELE parágrafo especificamente (não o roteiro todo) - pode repetir termo entre parágrafos se fizer
+sentido. Use só termos da lista acima, exatamente como estão escritos.
+
+Responda EXATAMENTE neste formato, uma linha por parágrafo, sem texto antes ou depois:
+1: <termo mais relevante pro parágrafo 1>
+2: <termo mais relevante pro parágrafo 2>
+(continue pra todos os parágrafos numerados acima)
+"""
+
+
+def _closest_keyword(guess: str, keywords: list[str]) -> str | None:
+    """Acha o termo de `keywords` mais parecido com `guess` - o LLM
+    raramente devolve o termo EXATO como foi dado (observado em teste real:
+    pediu pra usar "James Webb telescope newborn stars" e devolveu só
+    "newborn stars"), então em vez de exigir igualdade exata, casa por
+    substring nos dois sentidos e, por último, por maior sobreposição de
+    palavras - evita rejeitar toda resposta só por paráfrase/corte."""
+    guess_l = guess.lower().strip()
+    if not guess_l:
+        return None
+    for kw in keywords:
+        if kw.lower() == guess_l:
+            return kw
+    for kw in keywords:
+        kw_l = kw.lower()
+        if guess_l in kw_l or kw_l in guess_l:
+            return kw
+    guess_words = set(guess_l.split())
+    best, best_overlap = None, 0
+    for kw in keywords:
+        overlap = len(guess_words & set(kw.lower().split()))
+        if overlap > best_overlap:
+            best, best_overlap = kw, overlap
+    return best
+
+
+def _segment_keywords(script: str, keywords: list[str]) -> list[str] | None:
+    """Pra cada parágrafo do roteiro, pergunta ao LLM qual das palavras-
+    chave JÁ EXTRAÍDAS (não inventa termo novo) é mais específica daquele
+    trecho - usado pra casar a imagem mostrada com o TRECHO sendo narrado
+    naquele momento, não só o tema geral do vídeo inteiro (ver
+    _order_by_segment_relevance). Chamada separada e independente do
+    prompt principal de geração de roteiro - zero risco de regressão nele.
+    Fail-open: retorna None (o chamador cai pro comportamento anterior,
+    ordenar por continuidade de luminosidade) se o roteiro tiver só 1
+    parágrafo, não houver keywords, o Ollama não responder, ou o parsing
+    vier incompleto - nunca inventa/força um resultado de baixa confiança."""
+    paragraphs = [p.strip() for p in script.split("\n") if p.strip()]
+    if len(paragraphs) < 2 or not keywords:
+        return None
+
+    numbered = "\n".join(f"{i + 1}: {p}" for i, p in enumerate(paragraphs))
+    prompt = SEGMENT_KEYWORD_TEMPLATE.format(numbered_paragraphs=numbered, keywords=", ".join(keywords))
+    text = _call_ollama(prompt, timeout=60)
+    if not text:
+        return None
+
+    result: list[str | None] = [None] * len(paragraphs)
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if ":" not in line:
+            continue
+        idx_str, kw = line.split(":", 1)
+        idx_str, kw = idx_str.strip(), _clean_llm_text(kw)
+        if not idx_str.isdigit():
+            continue
+        idx = int(idx_str) - 1
+        if 0 <= idx < len(paragraphs):
+            matched = _closest_keyword(kw, keywords)
+            if matched:
+                result[idx] = matched
+
+    if any(r is None for r in result):
+        return None  # parsing incompleto - não confia num resultado parcial
+    return result
+
+
+def _order_by_segment_relevance(images: list, script: str, keywords: list[str]) -> list:
+    """Ordena as imagens pra casar com o PARÁGRAFO do roteiro mais
+    relacionado a cada uma (técnica de "b-roll por trecho" usada por
+    ferramentas reais como Invideo/Jupitrr), em vez de só continuidade de
+    luminosidade - reaproveita o mesmo CLIP (fastembed, ONNX, CPU-only) já
+    usado pra relevância/tipo de imagem, só que rankeando em vez de
+    filtrar. Fail-open em qualquer etapa (parsing do LLM, modelo não
+    carregar): cai pra _order_by_luminosity_continuity, o comportamento
+    anterior - nunca bloqueia nem degrada a geração do vídeo."""
+    segment_kws = _segment_keywords(script, keywords)
+    if not segment_kws:
+        return _order_by_luminosity_continuity(images)
+
+    try:
+        img_model = semantic._get_image_model()
+        txt_model = semantic._get_clip_text_model()
+        paths = [str(a.local_path) for a in images]
+        img_vectors = list(img_model.embed(paths))
+        unique_kws = list(dict.fromkeys(segment_kws))
+        kw_vecs = dict(zip(unique_kws, txt_model.embed(unique_kws)))
+    except Exception:
+        return _order_by_luminosity_continuity(images)
+
+    remaining = list(zip(images, img_vectors))
+    ordered = []
+    for kw in segment_kws:
+        if not remaining:
+            break
+        kw_vec = kw_vecs.get(kw)
+        if kw_vec is None:
+            ordered.append(remaining.pop(0)[0])
+            continue
+        scored = sorted(
+            range(len(remaining)), key=lambda i: semantic._cosine(kw_vec, remaining[i][1]), reverse=True
+        )
+        ordered.append(remaining.pop(scored[0])[0])
+
+    # Sobra (mais imagens buscadas que parágrafos no roteiro) - anexa no
+    # final preservando continuidade de luminosidade entre elas.
+    leftover = [a for a, _ in remaining]
+    if leftover:
+        ordered += _order_by_luminosity_continuity(leftover)
+    return ordered
+
+
 def _clean_llm_text(text: str) -> str:
     return text.strip().strip("*").strip('"').strip()
 
@@ -1241,7 +1372,7 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     # gancho inicial e o que é mostrado na tela.
     has_apod_anchor = bool(apod and apod.get("asset"))
     anchor, rest = (assets[0], assets[1:]) if has_apod_anchor else (None, assets)
-    rest = _order_by_luminosity_continuity(rest)
+    rest = _order_by_segment_relevance(rest, generated["script"], search_queries)
     assets = ([anchor] if anchor else []) + rest
 
     return {
