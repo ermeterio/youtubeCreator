@@ -264,7 +264,7 @@ def run_all_active_channels() -> list[int]:
     agendamento diário (ver scripts/run_daily.py) pra gerar o vídeo do dia de
     cada canal cadastrado em sequência."""
     catalog.init_db()
-    backup.backup_catalog()
+    backup.run_all()
 
     try:
         from pipeline import health
