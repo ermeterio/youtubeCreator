@@ -281,6 +281,47 @@ def _cta_clip(total_duration: float, resolution: tuple[int, int],
     )
 
 
+def _compute_image_durations(n: int, total_duration: float, captions: list[dict] | None,
+                              min_duration: float = 4.0) -> list[float]:
+    """Duração de cada imagem proporcional à quantidade REAL de fala daquele
+    trecho (via WordBoundary por palavra que o TTS já devolve), em vez de
+    dividir o tempo igualmente entre todas - imagem de um trecho com mais
+    conteúdo narrado fica mais tempo na tela, trecho mais curto passa mais
+    rápido. É a mesma técnica usada por editores automáticos reais (ex.
+    auto-editor, Descript "Remove Silences") pra dar ritmo mais parecido com
+    edição humana em vez de corte mecânico igual. Sem captions (chamada
+    direta sem legendas - hoje só acontece se build_video for chamado fora
+    do fluxo normal do orchestrator), cai pra divisão igual, como sempre
+    funcionou antes dessa função existir."""
+    # cada crossfade "come" CROSSFADE_DURATION do tempo total da sequência
+    # final (os clipes se sobrepõem) - mesmo ajuste que já existia antes.
+    budget = total_duration + (n - 1) * CROSSFADE_DURATION
+
+    if not captions or len(captions) < n:
+        return [max(budget / n, min_duration)] * n
+
+    # Distribui as palavras em n grupos CONTÍGUOS o mais parelho possível
+    # (mesma ordem em que aparecem na narração) - cada grupo vira 1 imagem.
+    base, remainder = divmod(len(captions), n)
+    group_sizes = [base + (1 if i < remainder else 0) for i in range(n)]
+
+    raw_durations = []
+    idx = 0
+    for size in group_sizes:
+        group = captions[idx: idx + size]
+        idx += size
+        span = (group[-1]["start"] + group[-1]["duration"]) - group[0]["start"]
+        raw_durations.append(max(span, 0.1))
+
+    # Aplica o piso mínimo (evita corte tão rápido que fica imperceptível)
+    # e reescala tudo proporcionalmente pra somar exatamente o orçamento
+    # total - mantém a matemática de crossfade/corte consistente com o
+    # resto da função em vez de deixar sobrar/faltar tempo.
+    floored = [max(d, min_duration) for d in raw_durations]
+    scale = budget / sum(floored)
+    return [d * scale for d in floored]
+
+
 def build_video(narration_path: Path, title: str, assets: list[VisualAsset], output_path: Path,
                  vertical: bool = False, captions: list[dict] | None = None,
                  credit_label: str = "Crédito", cta_text: str = "Inscreva-se no canal →") -> Path:
@@ -299,18 +340,16 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
     audio = AudioFileClip(str(narration_path))
     duration = audio.duration
     n = len(assets)
-    # cada crossfade "come" CROSSFADE_DURATION da duração total da sequência
-    # (os clipes se sobrepõem); compensa aqui pra sequência final bater com o
-    # áudio exatamente quando não bate no piso mínimo de 4s por imagem.
-    per_image_duration = max((duration + (n - 1) * CROSSFADE_DURATION) / n, 4.0)
+    durations = _compute_image_durations(n, duration, captions)
 
     clips = []
     for i, asset in enumerate(assets):
+        img_duration = durations[i]
         if asset.video_path:
-            clip = _video_clip_from_asset(asset, per_image_duration, resolution,
+            clip = _video_clip_from_asset(asset, img_duration, resolution,
                                            credit_color=bg_color, credit_label=credit_label)
         else:
-            clip = _ken_burns_clip(asset, per_image_duration, resolution, zoom_in=(i % 2 == 0),
+            clip = _ken_burns_clip(asset, img_duration, resolution, zoom_in=(i % 2 == 0),
                                     credit_color=bg_color, credit_label=credit_label)
         effects = []
         if i > 0:
@@ -331,8 +370,11 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
         .with_duration(min(6, duration))
     )
 
-    step = per_image_duration - CROSSFADE_DURATION
-    cut_times = [i * step for i in range(1, len(assets))]
+    cut_times = []
+    acc = 0.0
+    for d in durations[:-1]:
+        acc += d - CROSSFADE_DURATION
+        cut_times.append(acc)
 
     layers = [sequence, title_clip]
     layers += _flash_clips(cut_times, resolution, bg_color)

@@ -21,7 +21,7 @@ import requests
 from PIL import Image
 
 import config
-from pipeline import catalog, channels, notify, semantic, visual_source, youtube_analytics
+from pipeline import astro_events, catalog, channels, notify, semantic, visual_source, youtube_analytics
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
@@ -846,6 +846,28 @@ def _choose_fallback_topic(channel: sqlite3.Row) -> tuple[str, str]:
 # pipeline precisa mudar. _source_rotation é o fallback garantido (nunca
 # retorna None), por isso fica fora da lista, chamado só se todas as fontes
 # em CONTENT_SOURCES falharem.
+def _source_astro_event(channel: sqlite3.Row, api_key: str) -> dict | None:
+    """Evento astronômico real e datado (eclipse, chuva de meteoro,
+    superlua - ver pipeline/astro_events.py) dentro da janela de
+    antecedência pra cobrir ANTES de acontecer - captura o pico de busca
+    real que esses eventos geram (prática validada por pesquisa de mercado:
+    publicar guia de observação antes do evento, não depois). Prioridade
+    MÁXIMA (antes até da APOD) quando há um evento na janela, mas só usa
+    uma vez por evento - se o tópico já foi coberto recentemente pelo
+    canal, deixa a vez pra fonte de conteúdo normal em vez de repetir o
+    mesmo tema todo dia até a data do evento chegar."""
+    event = astro_events.upcoming_event()
+    if not event:
+        return None
+    recent = catalog.recent_topics(channel["id"], lookback=10)
+    if any(event.label.lower() in r.lower() for r in recent):
+        return None
+    return {
+        "topic": event.label, "image_query": event.image_query, "facts": event.facts,
+        "assets": [], "has_source": True,
+    }
+
+
 def _source_apod(channel: sqlite3.Row, api_key: str) -> dict | None:
     """NASA Astronomy Picture of the Day - fonte factual primária de sempre,
     prioridade máxima quando rende uma explicação longa o bastante pra
@@ -883,7 +905,7 @@ def _source_news(channel: sqlite3.Row, api_key: str) -> dict | None:
     return {"topic": topic, "image_query": image_query, "facts": facts, "assets": assets, "has_source": True}
 
 
-CONTENT_SOURCES = [_source_apod, _source_news]
+CONTENT_SOURCES = [_source_astro_event, _source_apod, _source_news]
 
 
 def _source_rotation(channel: sqlite3.Row) -> dict:

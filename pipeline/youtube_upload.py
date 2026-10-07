@@ -198,6 +198,30 @@ def upload_video(video_path: Path, title: str, description: str,
     return video_id
 
 
+def update_video_description(video_id: str, description: str, client_secret_path: Path, token_path: Path) -> None:
+    """Atualiza SÓ a descrição de um vídeo já publicado - usado pra
+    cross-linkar o Short e o vídeo longo depois que o SEGUNDO dos dois é
+    publicado (ver orchestrator.py: quando o primeiro sobe, o outro ainda
+    não existe no YouTube pra linkar; quando o segundo sobe, volta aqui pra
+    atualizar o primeiro também, deixando o link nos dois sentidos).
+
+    `videos.update` da API do YouTube exige reenviar o `snippet` INTEIRO,
+    não só o campo que mudou - mandar snippet parcial apaga título/tags/
+    categoria - então busca o snippet atual primeiro e troca só a
+    descrição nele antes de reenviar."""
+    creds = _get_credentials(client_secret_path, token_path)
+    youtube = build("youtube", "v3", credentials=creds)
+
+    response = youtube.videos().list(part="snippet", id=video_id).execute()
+    items = response.get("items", [])
+    if not items:
+        raise RuntimeError(f"Vídeo {video_id} não encontrado pra atualizar descrição.")
+    snippet = items[0]["snippet"]
+    snippet["description"] = description
+
+    youtube.videos().update(part="snippet", body={"id": video_id, "snippet": snippet}).execute()
+
+
 def set_thumbnail(video_id: str, thumbnail_path: Path, client_secret_path: Path, token_path: Path,
                    creds: Credentials | None = None) -> None:
     """Troca a thumbnail de um vídeo JÁ publicado - usado tanto no upload

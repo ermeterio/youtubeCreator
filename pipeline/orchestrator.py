@@ -81,7 +81,8 @@ def _build_tags(channel, track) -> list[str]:
     return unique_tags[:15]
 
 
-def _build_description(topic: str, script: str, credits: list[str], music_credit: str | None = None) -> str:
+def _build_description(topic: str, script: str, credits: list[str], music_credit: str | None = None,
+                        related_video_url: str | None = None, related_label: str | None = None) -> str:
     credit_line = ", ".join(sorted(set(credits))) or "NASA"
     description = (
         f"Vídeo original sobre {topic}, com narração e roteiro gerados com apoio de IA "
@@ -91,6 +92,11 @@ def _build_description(topic: str, script: str, credits: list[str], music_credit
     )
     if music_credit:
         description += f"\n\nMúsica:\n{music_credit}"
+    # Cross-link Short<->vídeo longo (prática validada: YouTube distribui
+    # melhor quando os dois formatos do mesmo conteúdo se referenciam -
+    # ver orchestrator.approve_and_upload/approve_and_upload_short).
+    if related_video_url and related_label:
+        description += f"\n\n{related_label}: {related_video_url}"
     return description
 
 
@@ -285,7 +291,17 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
 
     channel = channels.get_channel(track["channel_id"])
     credits = track["image_credits"].split(", ") if track["image_credits"] else ["NASA"]
-    description = _build_description(track["topic"], track["script"], credits, track["music_attribution"] if "music_attribution" in track.keys() else None)
+    music_credit = track["music_attribution"] if "music_attribution" in track.keys() else None
+
+    # Cross-link Short<->longo: se o Short deste mesmo track já foi
+    # publicado antes, linka pra ele na descrição do vídeo longo que está
+    # subindo agora.
+    short_id = track["youtube_short_video_id"] if "youtube_short_video_id" in track.keys() else None
+    related_url = f"https://youtube.com/shorts/{short_id}" if short_id else None
+    description = _build_description(
+        track["topic"], track["script"], credits, music_credit,
+        related_video_url=related_url, related_label="Versão curta (Short)" if related_url else None,
+    )
     tags = _build_tags(channel, track)
 
     video_id = youtube_upload.upload_video(
@@ -300,6 +316,24 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
         track_id, youtube_video_id=video_id, status="uploaded",
         published_at=datetime.now(timezone.utc).isoformat(),
     )
+
+    # Se o Short JÁ estava no ar, ele não tinha como linkar de volta pro
+    # vídeo longo (que não existia ainda) - atualiza a descrição dele agora
+    # que o longo também está publicado, deixando o link nos dois sentidos.
+    if short_id:
+        try:
+            short_desc = _build_description(
+                track["topic"], track["script"], credits, music_credit,
+                related_video_url=f"https://youtube.com/watch?v={video_id}", related_label="Vídeo completo",
+            )
+            youtube_upload.update_video_description(
+                short_id, short_desc,
+                client_secret_path=channels.client_secret_path(channel["slug"]),
+                token_path=channels.token_path(channel["slug"]),
+            )
+        except Exception as exc:
+            notify.log(f"[{channel['name']}] Falha ao atualizar link cruzado no Short já publicado: {exc}")
+
     return video_id
 
 
@@ -315,7 +349,16 @@ def approve_and_upload_short(track_id: int, privacy_status: str = "private") -> 
 
     channel = channels.get_channel(track["channel_id"])
     credits = track["image_credits"].split(", ") if track["image_credits"] else ["NASA"]
-    description = _build_description(track["topic"], track["script"], credits, track["music_attribution"] if "music_attribution" in track.keys() else None)
+    music_credit = track["music_attribution"] if "music_attribution" in track.keys() else None
+
+    # Cross-link Short<->longo (ver approve_and_upload): se o vídeo longo
+    # já foi publicado, linka pra ele na descrição do Short.
+    video_id_existing = track["youtube_video_id"] if "youtube_video_id" in track.keys() else None
+    related_url = f"https://youtube.com/watch?v={video_id_existing}" if video_id_existing else None
+    description = _build_description(
+        track["topic"], track["script"], credits, music_credit,
+        related_video_url=related_url, related_label="Vídeo completo" if related_url else None,
+    )
     tags = _build_tags(channel, track) + ["shorts"]
     short_title = track["title"] if "#shorts" in track["title"].lower() else f"{track['title']} #Shorts"
 
@@ -328,6 +371,23 @@ def approve_and_upload_short(track_id: int, privacy_status: str = "private") -> 
         made_for_kids=bool(channel["made_for_kids"]) if "made_for_kids" in channel.keys() else False,
     )
     catalog.update_track(track_id, youtube_short_video_id=video_id)
+
+    # Se o vídeo longo já estava no ar, atualiza a descrição dele agora pra
+    # linkar de volta pro Short que acabou de subir.
+    if video_id_existing:
+        try:
+            long_desc = _build_description(
+                track["topic"], track["script"], credits, music_credit,
+                related_video_url=f"https://youtube.com/shorts/{video_id}", related_label="Versão curta (Short)",
+            )
+            youtube_upload.update_video_description(
+                video_id_existing, long_desc,
+                client_secret_path=channels.client_secret_path(channel["slug"]),
+                token_path=channels.token_path(channel["slug"]),
+            )
+        except Exception as exc:
+            notify.log(f"[{channel['name']}] Falha ao atualizar link cruzado no vídeo longo já publicado: {exc}")
+
     return video_id
 
 
