@@ -363,6 +363,42 @@ Responda EXATAMENTE neste formato, uma linha por parágrafo, sem texto antes ou 
 """
 
 
+# Frase com número + unidade de comparação de escala (vezes maior, anos-luz,
+# massas solares, km, %, graus) - o tipo de fato que rende um "stat card" de
+# destaque no vídeo (ver video_build._scale_stat_clip, que usa FONT_DATA -
+# já existia em config.py reservada pra isso: "dados numéricos... se usado").
+# Puramente heurístico via regex, SEM chamada nova ao LLM - mesmo princípio
+# do chapters.py (dado que o roteiro já tem, só reaproveitado, nunca
+# inventado), o que elimina de saída o risco de alucinação que exigiu toda a
+# validação extra em strengthen_hook/_segment_keywords.
+# Testado contra 23 roteiros reais já gerados: pega ~17% deles (ex.: "O
+# planeta Marte está a cerca de 225 milhões de km da Terra.") - a maioria
+# dos roteiros desse canal é mais narrativo/descritivo do que numérico, não
+# é bug nem precisa forçar mais casamentos; quando não acha nada, o card
+# simplesmente não aparece.
+_SCALE_STAT_RE = re.compile(
+    r"[^.!?\n]*\b\d[\d.,]*\s*(?:vezes|anos[- ]luz|quil[ôo]metros|km\b|"
+    r"mil[ií]metros?|metros\b|massas? solares?|massas? d[eo] Sol|"
+    r"milh(?:[õo]es|ão)|bilh(?:[õo]es|ão)|trilh(?:[õo]es|ão)|graus?\b|%)"
+    r"[^.!?\n]*[.!?]",
+    re.IGNORECASE,
+)
+
+
+def extract_scale_stat(script: str) -> str | None:
+    """Primeira frase do roteiro com um número + unidade de escala
+    (distância, tamanho relativo, massa) - ou None se o roteiro não tiver
+    nenhuma (comum, e não é erro: nem todo tema rende uma comparação
+    numérica). O card some do vídeo nesse caso, sem quebrar nada."""
+    match = _SCALE_STAT_RE.search(script)
+    if not match:
+        return None
+    stat = match.group(0).strip()
+    if not (10 <= len(stat) <= 140):
+        return None
+    return stat
+
+
 def _closest_keyword(guess: str, keywords: list[str]) -> str | None:
     """Acha o termo de `keywords` mais parecido com `guess` - o LLM
     raramente devolve o termo EXATO como foi dado (observado em teste real:

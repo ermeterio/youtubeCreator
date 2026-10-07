@@ -232,7 +232,8 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
     if not video_path.exists():
         with notify.stage_timer(channel["name"], track_id, "video_build_long"):
             video_build.build_video(narration_path, title, assets, video_path, captions=boundaries,
-                                     credit_label=language["credit_label"], cta_text=language["cta_text"])
+                                     credit_label=language["credit_label"], cta_text=language["cta_text"],
+                                     script=script)
         catalog.update_track(track_id, video_path=str(video_path), status="video_ready")
 
     # Short = mesma narração/roteiro/Ken Burns completos, só reenquadrado em
@@ -245,7 +246,8 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
     if not short_path.exists():
         with notify.stage_timer(channel["name"], track_id, "video_build_short"):
             video_build.build_video(narration_path, title, assets, short_path, vertical=True, captions=boundaries,
-                                     credit_label=language["credit_label"], cta_text=language["cta_text"])
+                                     credit_label=language["credit_label"], cta_text=language["cta_text"],
+                                     script=script)
         catalog.update_track(track_id, video_vertical_path=str(short_path))
 
     with notify.stage_timer(channel["name"], track_id, "thumbnail"):

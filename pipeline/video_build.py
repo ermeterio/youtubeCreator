@@ -25,6 +25,7 @@ from moviepy import (
 from moviepy.video.fx import CrossFadeIn, CrossFadeOut
 
 import config
+from pipeline import script_gen
 from pipeline.thumbnail import palette_for
 from pipeline.visual_source import VisualAsset
 
@@ -36,6 +37,7 @@ MIN_ACCEPTABLE_SIDE = 1280  # abaixo disso a imagem não deve ocupar o quadro in
 ASPECT_TOLERANCE = 0.35  # desvio relativo aceitável entre proporção da imagem e do quadro
 FLASH_EVERY_N_CUTS = 3
 CTA_DURATION = 3.5
+SCALE_STAT_DURATION = 4.0
 CAPTION_MAX_WORDS = 4
 CAPTION_MAX_CHARS = 28
 
@@ -281,6 +283,33 @@ def _cta_clip(total_duration: float, resolution: tuple[int, int],
     )
 
 
+def _scale_stat_clip(stat_text: str, resolution: tuple[int, int], start: float, duration: float,
+                      accent_color: tuple[int, int, int]):
+    """"Stat card" com um fato numérico real do roteiro (distância, massa,
+    tamanho relativo - ver script_gen.extract_scale_stat) em destaque, fonte
+    monoespaçada (config.FONT_DATA, já reservada pra isso desde antes dessa
+    feature existir). "Pop-in" rápido (não é um contador numérico animado -
+    o número já vem pronto do roteiro, não dá pra "contar até" um valor tipo
+    "225 milhões de km" de forma que pareça natural) em vez de corte seco,
+    pra chamar atenção sem ser abrupto."""
+    w, h = resolution
+
+    def pop(t):
+        eased = _ease_in_out(min(t / 0.3, 1.0))
+        return 0.85 + 0.15 * eased
+
+    return (
+        _safe_text_clip(stat_text, config.FONT_DATA, int(h * 0.038), stroke_width=2,
+                        max_width=int(w * 0.82), color="white", stroke_color="black",
+                        bg_color=accent_color + (220,))
+        .resized(pop)
+        .with_position(("center", 0.22), relative=True)
+        .with_start(start)
+        .with_duration(duration)
+        .with_effects([CrossFadeIn(0.25), CrossFadeOut(0.25)])
+    )
+
+
 def _compute_image_durations(n: int, total_duration: float, captions: list[dict] | None,
                               min_duration: float = 4.0) -> list[float]:
     """Duração de cada imagem proporcional à quantidade REAL de fala daquele
@@ -324,7 +353,8 @@ def _compute_image_durations(n: int, total_duration: float, captions: list[dict]
 
 def build_video(narration_path: Path, title: str, assets: list[VisualAsset], output_path: Path,
                  vertical: bool = False, captions: list[dict] | None = None,
-                 credit_label: str = "Crédito", cta_text: str = "Inscreva-se no canal →") -> Path:
+                 credit_label: str = "Crédito", cta_text: str = "Inscreva-se no canal →",
+                 script: str | None = None) -> Path:
     """Monta o vídeo (horizontal ou vertical/Short) cobrindo a narração
     INTEIRA, sempre - nunca corta o roteiro pra caber num tempo fixo
     (relatado como problema real: um Short com duração limitada cortava o
@@ -380,6 +410,26 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
     layers += _flash_clips(cut_times, resolution, bg_color)
     if captions:
         layers += _caption_clips(captions, resolution, bg_color)
+
+    # Card de destaque com um fato numérico real do roteiro (ver
+    # script_gen.extract_scale_stat) - timing aproximado pela posição da
+    # frase dentro do texto (fração de caracteres × duração total), não
+    # sincronizado palavra-por-palavra: suficiente pra cair perto do trecho
+    # certo da narração sem precisar casar a frase inteira contra os
+    # boundaries do TTS (mais frágil, ver _closest_keyword pra um caso real
+    # onde esse tipo de casamento exato falhou). Opcional (script=None nas
+    # chamadas que não passam o roteiro) e nunca impede o vídeo de ser
+    # montado se não achar nada.
+    if script:
+        stat_match = script_gen._SCALE_STAT_RE.search(script)
+        stat_text = script_gen.extract_scale_stat(script)
+        if stat_match and stat_text:
+            fraction = stat_match.start() / max(len(script), 1)
+            stat_start = min(max(fraction * duration, 2.0), max(duration - SCALE_STAT_DURATION - 1.0, 2.0))
+            stat_duration = min(SCALE_STAT_DURATION, max(duration - stat_start, 0.0))
+            if stat_duration > 1.0:
+                layers.append(_scale_stat_clip(stat_text, resolution, stat_start, stat_duration, bg_color))
+
     layers.append(_cta_clip(duration, resolution, bg_color, cta_text=cta_text))
 
     final = CompositeVideoClip(layers, size=(w, h)).subclipped(0, duration)
