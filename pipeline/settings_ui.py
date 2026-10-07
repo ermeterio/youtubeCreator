@@ -12,16 +12,64 @@ editar código/JSON na mão.
 
 import json
 import re
+import secrets as secrets_lib
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, abort, redirect, render_template_string, request, send_file, url_for
+from flask_wtf import CSRFProtect
+from flask_wtf.csrf import generate_csrf
+from markupsafe import escape
 
 import config
 from pipeline import atomic_io, catalog, channels, notify, orchestrator, reports, spam_detection, youtube_analytics, youtube_upload
 
 app = Flask(__name__)
+
+# Sem SECRET_KEY nem proteção CSRF até aqui - achado real de segurança: um
+# <form> em QUALQUER página aberta no mesmo navegador (ou um e-mail/site
+# malicioso) conseguia fazer POST pra qualquer rota daqui (excluir canal,
+# vazar nada por resposta mas ainda assim destrutivo) sem o dono ter clicado
+# nada nesta interface - CSRF puro, sem login nenhum para servir de barreira.
+# Chave persistida em disco (não gerada de novo a cada restart) porque um
+# token de formulário sobrevivendo a um restart do servidor é o caso comum
+# (usuário com a página aberta num reinício do processo).
+_SECRET_KEY_FILE = config.SECRETS_DIR / "flask_secret.key"
+
+
+def _load_or_create_secret_key() -> bytes:
+    config.SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+    if _SECRET_KEY_FILE.exists():
+        return _SECRET_KEY_FILE.read_bytes()
+    key = secrets_lib.token_bytes(32)
+    _SECRET_KEY_FILE.write_bytes(key)
+    return key
+
+
+app.secret_key = _load_or_create_secret_key()
+csrf = CSRFProtect(app)
+
+# Formulários inteiros são montados como string HTML crua (f-strings), não
+# via Jinja - então não dá pra usar {{ csrf_token() }} dentro de cada um sem
+# reescrever todos os ~35 <form method="post"> do arquivo. Em vez disso,
+# injeta o campo oculto automaticamente em toda resposta HTML de saída -
+# cobre os formulários existentes e qualquer um novo que vier a ser
+# adicionado, sem depender de lembrar de repetir isso em cada rota.
+_FORM_POST_RE = re.compile(r'(<form\b[^>]*\bmethod="post"[^>]*>)', re.IGNORECASE)
+
+
+@app.after_request
+def _inject_csrf_token(response):
+    if response.content_type and response.content_type.startswith("text/html"):
+        html = response.get_data(as_text=True)
+        token = generate_csrf()
+        new_html = _FORM_POST_RE.sub(
+            lambda m: m.group(1) + f'<input type="hidden" name="csrf_token" value="{token}">', html
+        )
+        if new_html != html:
+            response.set_data(new_html)
+    return response
 
 _authorize_status: dict[int, str] = {}
 # Link de autorização capturado no momento em que o Google o gera - exibido
@@ -1594,12 +1642,22 @@ def channel_comments(channel_id: int):
 
         rows_html = ""
         for c, score, reasons in scored:
-            suggestion = _comment_suggestions.get(c["id"], "")
+            # Comentário vem de qualquer pessoa anônima no YouTube - é a ÚNICA
+            # entrada de dado externo não controlado pelo operador que acaba
+            # interpolada no HTML desta página (achado real de segurança: sem
+            # escape aqui, um comentário com <script> rodava no navegador do
+            # dono do canal ao abrir esta tela - XSS armazenado). author/text/
+            # suggestion (resposta de IA ecoa o texto do comentário) sempre
+            # escapados antes de entrar no f-string.
+            author_safe = escape(c["author"])
+            text_safe = escape(c["text"])
+            suggestion = escape(_comment_suggestions.get(c["id"], ""))
             reply_disabled = "" if c["can_reply"] else "disabled"
             spam_badge = ""
             spam_actions = ""
             if score >= 40:
-                spam_badge = f'<span class="badge missing">⚠ spam provável ({score}/100: {", ".join(reasons)})</span>'
+                reasons_safe = escape(", ".join(reasons))
+                spam_badge = f'<span class="badge missing">⚠ spam provável ({score}/100: {reasons_safe})</span>'
                 spam_actions = f"""
                 <form class="inline" method="post" action="{url_for('moderate_comment_route', channel_id=channel_id, comment_id=c['id'])}">
                   <input type="hidden" name="status" value="rejected">
@@ -1608,13 +1666,13 @@ def channel_comments(channel_id: int):
                 """
             rows_html += f"""
             <div class="panel" style="margin-bottom:12px;">
-              <p><b>{c['author']}</b> <span class="muted">({c['published_at'][:10]})</span>
+              <p><b>{author_safe}</b> <span class="muted">({c['published_at'][:10]})</span>
               {f'<span class="badge inactive">{c["reply_count"]} resposta(s)</span>' if c['reply_count'] else ''}
               {spam_badge}</p>
-              <p>{c['text']}</p>
+              <p>{text_safe}</p>
               {spam_actions}
               <form method="post" action="{url_for('suggest_comment_reply_route', channel_id=channel_id, comment_id=c['id'])}" class="inline">
-                <input type="hidden" name="comment_text" value="{c['text'].replace(chr(34), '&quot;')}">
+                <input type="hidden" name="comment_text" value="{text_safe}">
                 <button type="submit" class="secondary">💬 Sugerir resposta com IA</button>
               </form>
               <form method="post" action="{url_for('reply_comment_route', channel_id=channel_id, comment_id=c['id'])}" style="margin-top:8px;">

@@ -10,3 +10,4 @@ edge-tts
 flask
 fastembed
 imageio-ffmpeg
+flask-wtf
