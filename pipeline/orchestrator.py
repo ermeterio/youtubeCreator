@@ -21,7 +21,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import config
-from pipeline import atomic_io, audio_post, backup, catalog, chapters, channels, music, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
+from pipeline import atomic_io, audio_post, backup, captions_export, catalog, chapters, channels, music, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
 
 # Status em que o track já passou por roteiro+imagens+narração (a parte cara:
 # chamadas ao Ollama, busca de imagem, TTS) mas ainda não terminou a
@@ -336,6 +336,26 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
         track_id, youtube_video_id=video_id, status="uploaded",
         published_at=datetime.now(timezone.utc).isoformat(),
     )
+
+    # Legenda real (.srt) - reaproveita o timing por palavra salvo no
+    # checkpoint.json da geração (nunca é apagado) pra subir uma legenda
+    # de verdade, não a auto-gerada do YouTube (ver pipeline/
+    # captions_export.py). Indexação de busca melhor é o ganho; best-
+    # effort, nunca bloqueia a publicação se o checkpoint já não existir
+    # (instalação antiga) ou a API recusar.
+    try:
+        checkpoint = _load_checkpoint(Path(track["narration_path"]).parent)
+        srt_content = captions_export.build_srt(checkpoint["boundaries"]) if checkpoint else None
+        if srt_content:
+            language_code = (channel["language"] or "pt-BR").split("-")[0]
+            youtube_upload.upload_captions(
+                video_id, srt_content,
+                client_secret_path=channels.client_secret_path(channel["slug"]),
+                token_path=channels.token_path(channel["slug"]),
+                language=language_code,
+            )
+    except Exception as exc:
+        notify.log(f"[{channel['name']}] Falha ao subir legenda .srt (não bloqueia a publicação): {exc}")
 
     # Playlist automática por série - cria sob demanda na primeira vez que a
     # série publica, reaproveitada nas próximas (ver pipeline/catalog.

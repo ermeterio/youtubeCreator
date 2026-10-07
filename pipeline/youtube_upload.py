@@ -23,6 +23,7 @@ então o disclosure de conteúdo A/S (alterado/sintético) é aplicado por padr�
 em todo vídeo publicado, conforme a política de rotulagem do YouTube.
 """
 
+import io
 import time
 import webbrowser
 from pathlib import Path
@@ -33,7 +34,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
 
 import config
 from pipeline import atomic_io
@@ -220,6 +221,22 @@ def update_video_description(video_id: str, description: str, client_secret_path
     snippet["description"] = description
 
     youtube.videos().update(part="snippet", body={"id": video_id, "snippet": snippet}).execute()
+
+
+def upload_captions(video_id: str, srt_content: str, client_secret_path: Path, token_path: Path,
+                     language: str = "pt") -> str:
+    """Sobe um arquivo de legenda REAL (.srt) pra um vídeo já publicado -
+    diferente da legenda auto-gerada pelo YouTube (reconhecimento de voz
+    automático, erra bastante em vocabulário técnico de nicho), essa vem
+    direto do texto que de fato foi narrado. Indexação de busca melhor
+    (YouTube indexa o texto da legenda) é o ganho real - ver
+    pipeline/captions_export.py."""
+    creds = _get_credentials(client_secret_path, token_path)
+    youtube = build("youtube", "v3", credentials=creds)
+    media = MediaIoBaseUpload(io.BytesIO(srt_content.encode("utf-8")), mimetype="application/octet-stream")
+    body = {"snippet": {"videoId": video_id, "language": language, "name": "", "isDraft": False}}
+    response = youtube.captions().insert(part="snippet", body=body, media_body=media).execute()
+    return response["id"]
 
 
 def get_or_create_playlist(title: str, description: str, client_secret_path: Path, token_path: Path) -> str:
