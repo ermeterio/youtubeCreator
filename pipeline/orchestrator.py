@@ -127,7 +127,8 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         narration_path = Path(resumable["narration_path"])
         print(f"[canal {channel['name']} | track {track_id}] retomando execução incompleta (estava em '{resumable['status']}').")
     else:
-        result = script_gen.build_daily_script(channel, forced_topic=forced_topic)
+        with notify.stage_timer(channel["name"], None, "script_gen"):
+            result = script_gen.build_daily_script(channel, forced_topic=forced_topic)
         script, topic, assets = result["script"], result["topic"], result["visual_assets"]
         fact_check, series = result["fact_check"], result["series"]
         fact_check_details = result.get("fact_check_details")
@@ -176,10 +177,11 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         voice = forced_voice or channels.narration_voice_for(channel)
         rate = channels.narration_rate_for(channel)
         pitch = channels.narration_pitch_for(channel)
-        _, boundaries = narration.generate_narration_for_channel(
-            script, raw_narration_path, channel, voice=voice, rate=rate, pitch=pitch
-        )
-        audio_post.postprocess_audio(raw_narration_path, narration_path)
+        with notify.stage_timer(channel["name"], track_id, "narration"):
+            _, boundaries = narration.generate_narration_for_channel(
+                script, raw_narration_path, channel, voice=voice, rate=rate, pitch=pitch
+            )
+            audio_post.postprocess_audio(raw_narration_path, narration_path)
 
         # Trilha sonora de fundo com ducking automático (ver pipeline/music.py)
         # - só muda algo se houver faixas locais baixadas (scripts/
@@ -228,8 +230,9 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
 
     video_path = work_dir / "video.mp4"
     if not video_path.exists():
-        video_build.build_video(narration_path, title, assets, video_path, captions=boundaries,
-                                 credit_label=language["credit_label"], cta_text=language["cta_text"])
+        with notify.stage_timer(channel["name"], track_id, "video_build_long"):
+            video_build.build_video(narration_path, title, assets, video_path, captions=boundaries,
+                                     credit_label=language["credit_label"], cta_text=language["cta_text"])
         catalog.update_track(track_id, video_path=str(video_path), status="video_ready")
 
     # Short = mesma narração/roteiro/Ken Burns completos, só reenquadrado em
@@ -240,21 +243,23 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
     # Shorts curtos - correto é o vídeo caber o conteúdo, não o contrário.
     short_path = work_dir / "short.mp4"
     if not short_path.exists():
-        video_build.build_video(narration_path, title, assets, short_path, vertical=True, captions=boundaries,
-                                 credit_label=language["credit_label"], cta_text=language["cta_text"])
+        with notify.stage_timer(channel["name"], track_id, "video_build_short"):
+            video_build.build_video(narration_path, title, assets, short_path, vertical=True, captions=boundaries,
+                                     credit_label=language["credit_label"], cta_text=language["cta_text"])
         catalog.update_track(track_id, video_vertical_path=str(short_path))
 
-    thumb_path = work_dir / "thumbnail.jpg"
-    if not thumb_path.exists():
-        thumbnail.build_thumbnail(assets[0], title, thumb_path, credit_label=language["credit_label"])
-    # Variante B pro teste A/B de thumbnail (ver health.run_thumbnail_ab_tests):
-    # imagem diferente (a 2ª melhor, se houver) + paleta deslocada, pra ser
-    # visualmente distinta de verdade, não só um filtro sutil.
-    thumb_b_path = work_dir / "thumbnail_b.jpg"
-    if not thumb_b_path.exists():
-        alt_asset = assets[1] if len(assets) > 1 else assets[0]
-        thumbnail.build_thumbnail(alt_asset, title, thumb_b_path, credit_label=language["credit_label"],
-                                   palette_offset=1)
+    with notify.stage_timer(channel["name"], track_id, "thumbnail"):
+        thumb_path = work_dir / "thumbnail.jpg"
+        if not thumb_path.exists():
+            thumbnail.build_thumbnail(assets[0], title, thumb_path, credit_label=language["credit_label"])
+        # Variante B pro teste A/B de thumbnail (ver health.run_thumbnail_ab_tests):
+        # imagem diferente (a 2ª melhor, se houver) + paleta deslocada, pra ser
+        # visualmente distinta de verdade, não só um filtro sutil.
+        thumb_b_path = work_dir / "thumbnail_b.jpg"
+        if not thumb_b_path.exists():
+            alt_asset = assets[1] if len(assets) > 1 else assets[0]
+            thumbnail.build_thumbnail(alt_asset, title, thumb_b_path, credit_label=language["credit_label"],
+                                       palette_offset=1)
     catalog.update_track(track_id, thumbnail_path=str(thumb_path), thumbnail_b_path=str(thumb_b_path),
                           status="pending_review")
 
@@ -337,14 +342,15 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
     )
     tags = _build_tags(channel, track)
 
-    video_id = youtube_upload.upload_video(
-        track["video_path"], track["title"], description, tags,
-        client_secret_path=channels.client_secret_path(channel["slug"]),
-        token_path=channels.token_path(channel["slug"]),
-        thumbnail_path=track["thumbnail_path"], privacy_status=privacy_status,
-        category_id=channel["video_category_id"] if "video_category_id" in channel.keys() else "28",
-        made_for_kids=bool(channel["made_for_kids"]) if "made_for_kids" in channel.keys() else False,
-    )
+    with notify.stage_timer(channel["name"], track_id, "upload"):
+        video_id = youtube_upload.upload_video(
+            track["video_path"], track["title"], description, tags,
+            client_secret_path=channels.client_secret_path(channel["slug"]),
+            token_path=channels.token_path(channel["slug"]),
+            thumbnail_path=track["thumbnail_path"], privacy_status=privacy_status,
+            category_id=channel["video_category_id"] if "video_category_id" in channel.keys() else "28",
+            made_for_kids=bool(channel["made_for_kids"]) if "made_for_kids" in channel.keys() else False,
+        )
     catalog.update_track(
         track_id, youtube_video_id=video_id, status="uploaded",
         published_at=datetime.now(timezone.utc).isoformat(),
