@@ -195,6 +195,19 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         except Exception as exc:
             notify.log(f"[{channel['name']}] Trilha sonora falhou (não bloqueia a geração): {exc}")
 
+        # Normalização de LOUDNESS (não só pico) na mistura FINAL - depois
+        # da música/ducking, que é o que importa pro YouTube não re-
+        # normalizar o áudio do jeito dele depois do upload (ver
+        # audio_post.normalize_loudness). Best-effort: se o ffmpeg falhar
+        # por qualquer motivo, segue com o áudio de antes (música+ducking,
+        # ou só a narração se a música também tiver falhado).
+        try:
+            loudness_path = work_dir / "narration_loudnorm.mp3"
+            audio_post.normalize_loudness(narration_path, loudness_path)
+            narration_path = loudness_path
+        except Exception as exc:
+            notify.log(f"[{channel['name']}] Normalização de loudness falhou (não bloqueia a geração): {exc}")
+
         # Capítulos (YouTube Chapters) - calculados aqui, com o timing por
         # palavra fresco, e guardados prontos pra descrição (ver
         # pipeline/chapters.py). Sem LLM novo, só formatação; None se o

@@ -9,3 +9,4 @@ requests
 edge-tts
 flask
 fastembed
+imageio-ffmpeg
