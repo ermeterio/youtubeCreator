@@ -252,6 +252,41 @@ def _image_resolution(asset) -> int:
         return 0
 
 
+def _image_luminosity(asset) -> float:
+    """Luminosidade média (0-255) da imagem - usada só pra ORDENAR a
+    sequência final (nunca altera os pixels da foto real, só a posição dela
+    no vídeo), evitando um corte abrupto de imagem muito clara pra muito
+    escura. Pra asset de vídeo real, usa o frame já extraído em
+    `local_path` (o mesmo usado pra relevância via CLIP - já existe em
+    disco, não baixa nada novo)."""
+    try:
+        from PIL import ImageStat
+        with Image.open(asset.local_path) as img:
+            return ImageStat.Stat(img.convert("L")).mean[0]
+    except Exception:
+        return 128.0  # neutro (meio-tom) se não conseguir medir
+
+
+def _order_by_luminosity_continuity(images: list) -> list:
+    """Reordena a sequência pra minimizar saltos abruptos de luminosidade
+    entre cortes consecutivos - técnica usada em correção de cor
+    automatizada real (Adobe Color Match, DaVinci Colourlab AI), aqui só a
+    parte de REORDENAR (não altera brilho/cor de nenhuma foto, que
+    continuam sendo imagens reais sem tratamento). Caminho guloso: começa
+    pela imagem de maior resolução (mantém a prioridade de qualidade logo
+    no início do vídeo) e, a cada passo, escolhe da pool restante a
+    luminosidade mais PRÓXIMA da última escolhida."""
+    if len(images) <= 2:
+        return images
+    remaining = sorted(images, key=_image_resolution, reverse=True)
+    ordered = [remaining.pop(0)]
+    while remaining:
+        last_lum = _image_luminosity(ordered[-1])
+        remaining.sort(key=lambda a: abs(_image_luminosity(a) - last_lum))
+        ordered.append(remaining.pop(0))
+    return ordered
+
+
 def _clean_llm_text(text: str) -> str:
     return text.strip().strip("*").strip('"').strip()
 
@@ -1145,7 +1180,7 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     # gancho inicial e o que é mostrado na tela.
     has_apod_anchor = bool(apod and apod.get("asset"))
     anchor, rest = (assets[0], assets[1:]) if has_apod_anchor else (None, assets)
-    rest.sort(key=_image_resolution, reverse=True)
+    rest = _order_by_luminosity_continuity(rest)
     assets = ([anchor] if anchor else []) + rest
 
     return {
