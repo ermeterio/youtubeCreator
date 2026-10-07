@@ -92,6 +92,19 @@ CREATE TABLE IF NOT EXISTS channel_schedule (
     topic_query TEXT,
     UNIQUE(channel_id, weekday)
 );
+
+-- Playlist real do YouTube mantida automaticamente por série (ver
+-- pipeline.playlists) - cada vídeo publicado entra na playlist da sua
+-- própria série, criada sob demanda na primeira vez que a série publica um
+-- vídeo. Dá ao espectador uma fila com autoplay em vez de só um vídeo
+-- isolado (prática validada: ver análise de features de 07/10/2026).
+CREATE TABLE IF NOT EXISTS series_playlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL,
+    series TEXT NOT NULL,
+    youtube_playlist_id TEXT NOT NULL,
+    UNIQUE(channel_id, series)
+);
 """
 
 # Colunas adicionadas depois da criação inicial da tabela - CREATE TABLE IF
@@ -418,6 +431,24 @@ def get_channel_schedule(channel_id: int) -> list[sqlite3.Row]:
             "SELECT * FROM channel_schedule WHERE channel_id = ? ORDER BY weekday",
             (channel_id,),
         ).fetchall()
+
+
+def get_series_playlist(channel_id: int, series: str) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT youtube_playlist_id FROM series_playlists WHERE channel_id = ? AND series = ?",
+            (channel_id, series),
+        ).fetchone()
+    return row["youtube_playlist_id"] if row else None
+
+
+def set_series_playlist(channel_id: int, series: str, youtube_playlist_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO series_playlists (channel_id, series, youtube_playlist_id) VALUES (?, ?, ?) "
+            "ON CONFLICT(channel_id, series) DO UPDATE SET youtube_playlist_id = excluded.youtube_playlist_id",
+            (channel_id, series, youtube_playlist_id),
+        )
 
 
 def update_schedule_day(channel_id: int, weekday: int, enabled: bool, topic_mode: str,

@@ -222,6 +222,45 @@ def update_video_description(video_id: str, description: str, client_secret_path
     youtube.videos().update(part="snippet", body={"id": video_id, "snippet": snippet}).execute()
 
 
+def get_or_create_playlist(title: str, description: str, client_secret_path: Path, token_path: Path) -> str:
+    """Acha uma playlist do canal com esse TÍTULO exato, ou cria uma nova se
+    não existir - usado pra manter 1 playlist por série (ver
+    pipeline/playlists.py), reaproveitando a API real `playlists` do
+    YouTube Data v3 (confirmada disponível por introspecção do client em
+    07/10/2026 - diferente de end screens/cards, que NÃO existem na API
+    pública, só na interface do YouTube Studio)."""
+    creds = _get_credentials(client_secret_path, token_path)
+    youtube = build("youtube", "v3", credentials=creds)
+
+    response = youtube.playlists().list(part="snippet", mine=True, maxResults=50).execute()
+    for item in response.get("items", []):
+        if item["snippet"]["title"] == title:
+            return item["id"]
+
+    body = {
+        "snippet": {"title": title, "description": description},
+        "status": {"privacyStatus": "public"},
+    }
+    created = youtube.playlists().insert(part="snippet,status", body=body).execute()
+    return created["id"]
+
+
+def add_video_to_playlist(playlist_id: str, video_id: str, client_secret_path: Path, token_path: Path) -> None:
+    """Adiciona um vídeo ao FINAL de uma playlist - idempotente o bastante
+    pro uso daqui (cada vídeo só é publicado 1 vez, então só é chamado 1
+    vez por vídeo); se o vídeo já estiver na playlist por algum motivo, a
+    API retorna erro 409 que é só logado pelo chamador, não propagado."""
+    creds = _get_credentials(client_secret_path, token_path)
+    youtube = build("youtube", "v3", credentials=creds)
+    body = {
+        "snippet": {
+            "playlistId": playlist_id,
+            "resourceId": {"kind": "youtube#video", "videoId": video_id},
+        }
+    }
+    youtube.playlistItems().insert(part="snippet", body=body).execute()
+
+
 def set_thumbnail(video_id: str, thumbnail_path: Path, client_secret_path: Path, token_path: Path,
                    creds: Credentials | None = None) -> None:
     """Troca a thumbnail de um vídeo JÁ publicado - usado tanto no upload

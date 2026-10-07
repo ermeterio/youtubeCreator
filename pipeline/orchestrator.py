@@ -317,6 +317,29 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
         published_at=datetime.now(timezone.utc).isoformat(),
     )
 
+    # Playlist automática por série - cria sob demanda na primeira vez que a
+    # série publica, reaproveitada nas próximas (ver pipeline/catalog.
+    # get_series_playlist). Fila com autoplay em vez de vídeo isolado -
+    # best-effort, nunca bloqueia a publicação se falhar.
+    if track["series"]:
+        try:
+            playlist_id = catalog.get_series_playlist(channel["id"], track["series"])
+            if not playlist_id:
+                playlist_id = youtube_upload.get_or_create_playlist(
+                    track["series"],
+                    f"Vídeos da série \"{track['series']}\" do canal {channel['name']}.",
+                    client_secret_path=channels.client_secret_path(channel["slug"]),
+                    token_path=channels.token_path(channel["slug"]),
+                )
+                catalog.set_series_playlist(channel["id"], track["series"], playlist_id)
+            youtube_upload.add_video_to_playlist(
+                playlist_id, video_id,
+                client_secret_path=channels.client_secret_path(channel["slug"]),
+                token_path=channels.token_path(channel["slug"]),
+            )
+        except Exception as exc:
+            notify.log(f"[{channel['name']}] Falha ao adicionar vídeo à playlist da série: {exc}")
+
     # Se o Short JÁ estava no ar, ele não tinha como linkar de volta pro
     # vídeo longo (que não existia ainda) - atualiza a descrição dele agora
     # que o longo também está publicado, deixando o link nos dois sentidos.
