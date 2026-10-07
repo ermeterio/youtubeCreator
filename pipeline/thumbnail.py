@@ -65,17 +65,27 @@ def build_thumbnail(main_asset: VisualAsset, title: str, output_path: Path,
             current = trial
     lines.append(current)
 
+    # Contorno preto grosso em volta do título - sem isso, texto claro (branco
+    # ou dourado) cai ilegível sempre que calha de ficar sobre a parte clara
+    # de uma foto real da NASA (nebulosa, superfície iluminada), já que o
+    # overlay de cor (alpha 90) sozinho não garante contraste suficiente em
+    # toda a imagem. Prática padrão de thumbnail do YouTube (texto grosso +
+    # contorno), não decoração - é o que resolve o problema real de
+    # legibilidade, não precisa de nenhuma lib nova (suportado nativamente
+    # pelo Pillow desde a versão 6.2).
+    TITLE_STROKE_WIDTH = 4
     total_h = sum(draw.textbbox((0, 0), line, font=font)[3] for line in lines) + 20 * len(lines)
     y = (THUMB_SIZE[1] - total_h) / 2
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
         w = bbox[2] - bbox[0]
-        draw.text(((THUMB_SIZE[0] - w) / 2, y), line, font=font, fill=text_color)
+        draw.text(((THUMB_SIZE[0] - w) / 2, y), line, font=font, fill=text_color,
+                   stroke_width=TITLE_STROKE_WIDTH, stroke_fill=(0, 0, 0))
         y += (bbox[3] - bbox[1]) + 20
 
     credit_display = main_asset.credit if len(main_asset.credit) <= 45 else main_asset.credit[:44].rstrip() + "…"
     draw.text((20, THUMB_SIZE[1] - 45), f"{credit_label}: {credit_display}",
-              font=credit_font, fill=(255, 255, 255))
+              font=credit_font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     # Mesmo padrão de escrita atômica do video_build.py: escreve num arquivo
