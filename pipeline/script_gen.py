@@ -198,6 +198,63 @@ ROTEIRO_REVISADO: <roteiro corrigido completo, pronto pra narração>
 """
 
 
+HOOK_TEMPLATE = """Você é editor de roteiros de vídeo do YouTube sobre {niche}, especializado em
+RETENÇÃO de audiência (prática validada: abertura com "pattern interrupt" nos primeiros segundos
+aumenta retenção média em ~23% vs abertura genérica/estática).
+
+Avalie a ABERTURA do roteiro abaixo (a 1ª frase, no máximo as 2 primeiras) contra isto: ela é uma
+introdução genérica/morna tipo "Hoje vamos falar sobre...", "Você sabia que X é fascinante?" ou
+"Vamos explorar..."? Se SIM, reescreva SÓ essa primeira frase pra algo mais direto e intrigante.
+
+REGRA MAIS IMPORTANTE, NÃO QUEBRE: você só pode REORDENAR/REESCREVER fatos que JÁ ESTÃO no roteiro
+original. PROIBIDO inventar qualquer fato, número, imagem, descoberta ou detalhe que não esteja
+literalmente no roteiro original abaixo - isso é desinformação, não é permitido. Se não houver um
+fato forte o bastante já presente no roteiro pra abrir com impacto sem inventar nada, devolva o
+roteiro ORIGINAL sem nenhuma mudança - é preferível uma abertura morna a uma abertura inventada.
+
+NÃO toque em mais nada além da 1ª (no máximo 2ª) frase - o resto do roteiro, palavra por palavra,
+tem que ficar IDÊNTICO ao original.
+
+ROTEIRO ORIGINAL:
+---
+{script}
+---
+
+Responda EXATAMENTE neste formato, sem texto antes ou depois, sem marcadores extras como "---":
+ROTEIRO_REVISADO: <roteiro completo, com ou sem mudança na 1ª frase>
+"""
+
+
+def strengthen_hook(script: str, niche: str = "ciência") -> str:
+    """Passada de revisão ESPECÍFICA da abertura (primeiros segundos) do
+    roteiro, feita pelo Llama depois do polish_script - prática validada de
+    retenção de audiência (pattern interrupt), não uma correção de texto
+    genérica. Guarda-corpo MAIS RIGOROSO que polish_script: aqui o risco
+    real (observado em teste) é o LLM "inventar" um fato/detalhe vívido pra
+    deixar a abertura mais impactante (ex.: "o maior buraco negro já
+    descoberto" sem isso estar no roteiro original) - isso é desinformação,
+    não estilo. Além do range de tamanho, exige que tudo DEPOIS da 1ª frase
+    continue literalmente igual ao original; qualquer divergência rejeita a
+    revisão inteira e mantém o roteiro original."""
+    prompt = HOOK_TEMPLATE.format(script=script, niche=niche)
+    text = _call_ollama(prompt, timeout=90)
+    if not text or not _has_marker(text, "ROTEIRO_REVISADO:"):
+        return script
+    revised = _clean_llm_text(_split_at_marker(text, "ROTEIRO_REVISADO:")[1].strip())
+    revised = revised.lstrip("-").strip()
+    if not revised or not (0.7 <= len(revised) / max(len(script), 1) <= 1.3):
+        return script
+
+    # O resto do roteiro (tudo depois da 1ª frase) precisa continuar
+    # LITERALMENTE igual ao original - só a abertura pode mudar. Compara
+    # pelo final dos dois textos (mais robusto que achar a "1ª frase" por
+    # pontuação, que pode falhar com abreviação/decimal).
+    tail_len = min(len(script), len(revised)) - 40
+    if tail_len > 0 and script[-tail_len:] != revised[-tail_len:]:
+        return script
+    return revised
+
+
 def polish_script(script: str, niche: str = "ciência") -> str:
     """Passada de revisão de texto feita pelo Llama ANTES do fact-check/
     narração - ao contrário do clarity_review (que só SINALIZA problemas pro
@@ -1071,6 +1128,10 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         # narrado (a revisão não deve mudar fatos, mas se mudar algo por
         # engano, é essa versão final que precisa ser validada).
         generated["script"] = polish_script(generated["script"], niche)
+        # Reforça o gancho de abertura (retenção) DEPOIS do polish (texto já
+        # limpo) e ANTES do fact-check (precisa validar a versão final, que
+        # pode ter a abertura reescrita).
+        generated["script"] = strengthen_hook(generated["script"], niche)
         fact_check, fact_check_details = _fact_check(generated["script"], facts)
 
     # Um vídeo longo com uma imagem só fica monótono. Busca por várias
