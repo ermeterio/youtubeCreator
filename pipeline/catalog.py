@@ -143,6 +143,13 @@ _MIGRATION_COLUMNS = {
         # Null quando nenhuma faixa local estava disponível (vídeo segue
         # sem música, como sempre funcionou antes dessa funcionalidade).
         "music_attribution": "TEXT",
+        # Capítulos (YouTube Chapters) já formatados pra colar na descrição
+        # (ver pipeline/chapters.py) - calculado uma vez na geração (quando
+        # o timing por palavra da narração está fresco) e reaproveitado na
+        # publicação. Null quando o roteiro não rendeu capítulos válidos
+        # (curto demais, só 1 parágrafo etc.) - vídeo publica normalmente
+        # sem essa seção.
+        "chapters_text": "TEXT",
     },
     "channels": {
         "series_primary": "TEXT NOT NULL DEFAULT 'Direto da Fonte'",

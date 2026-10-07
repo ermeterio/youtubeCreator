@@ -21,7 +21,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import config
-from pipeline import atomic_io, audio_post, backup, catalog, channels, music, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
+from pipeline import atomic_io, audio_post, backup, catalog, chapters, channels, music, narration, notify, script_gen, semantic, thumbnail, video_build, visual_source, youtube_upload
 
 # Status em que o track já passou por roteiro+imagens+narração (a parte cara:
 # chamadas ao Ollama, busca de imagem, TTS) mas ainda não terminou a
@@ -82,12 +82,22 @@ def _build_tags(channel, track) -> list[str]:
 
 
 def _build_description(topic: str, script: str, credits: list[str], music_credit: str | None = None,
-                        related_video_url: str | None = None, related_label: str | None = None) -> str:
+                        related_video_url: str | None = None, related_label: str | None = None,
+                        chapters_text: str | None = None) -> str:
     credit_line = ", ".join(sorted(set(credits))) or "NASA"
     description = (
         f"Vídeo original sobre {topic}, com narração e roteiro gerados com apoio de IA "
-        f"a partir de dados públicos da NASA, com revisão humana antes da publicação.\n\n"
-        f"Imagens: {credit_line}.\n\n"
+        f"a partir de dados públicos da NASA, com revisão humana antes da publicação."
+    )
+    # Capítulos (YouTube Chapters) - logo após a 1ª linha, ANTES de qualquer
+    # outro texto com formato de timestamp (não que exista aqui, mas por
+    # segurança): a regra do YouTube é que o PRIMEIRO timestamp encontrado
+    # na descrição precisa ser "0:00" pra ativar os capítulos - colocar
+    # cedo evita qualquer ambiguidade (ver pipeline/chapters.py).
+    if chapters_text:
+        description += f"\n\n{chapters_text}"
+    description += (
+        f"\n\nImagens: {credit_line}.\n\n"
         f"Conteúdo alterado/sintético: roteiro e narração gerados por inteligência artificial."
     )
     if music_credit:
@@ -185,8 +195,16 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         except Exception as exc:
             notify.log(f"[{channel['name']}] Trilha sonora falhou (não bloqueia a geração): {exc}")
 
+        # Capítulos (YouTube Chapters) - calculados aqui, com o timing por
+        # palavra fresco, e guardados prontos pra descrição (ver
+        # pipeline/chapters.py). Sem LLM novo, só formatação; None se o
+        # roteiro não render capítulos válidos (curto demais etc.).
+        built_chapters = chapters.build_chapters(script, boundaries)
+        chapters_text = chapters.format_chapters_for_description(built_chapters) if built_chapters else None
+
         catalog.update_track(
-            track_id, narration_path=str(narration_path), status="narration_ready", music_attribution=music_credit
+            track_id, narration_path=str(narration_path), status="narration_ready",
+            music_attribution=music_credit, chapters_text=chapters_text,
         )
         # Guarda imagens+legendas em disco ANTES de montar vídeo - é a parte
         # cara (Ollama, busca de imagem, TTS) que não vale a pena regerar se
@@ -298,9 +316,11 @@ def approve_and_upload(track_id: int, privacy_status: str = "private") -> str:
     # subindo agora.
     short_id = track["youtube_short_video_id"] if "youtube_short_video_id" in track.keys() else None
     related_url = f"https://youtube.com/shorts/{short_id}" if short_id else None
+    chapters_text = track["chapters_text"] if "chapters_text" in track.keys() else None
     description = _build_description(
         track["topic"], track["script"], credits, music_credit,
         related_video_url=related_url, related_label="Versão curta (Short)" if related_url else None,
+        chapters_text=chapters_text,
     )
     tags = _build_tags(channel, track)
 
