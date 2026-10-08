@@ -401,8 +401,11 @@ def index():
         """
 
     shared_key = channels.shared_nasa_api_key() or ""
+    # Aberto por padrão (sem o atributo "open" antes, relatado como "não
+    # achei onde configurar a chave da NASA" - a seção existia, só estava
+    # escondida demais dentro de um <details> fechado).
     settings_panel = f"""
-    <details style="margin-top:24px;">
+    <details style="margin-top:24px;" open>
       <summary style="cursor:pointer; color:var(--text-muted);">⚙️ Configuração compartilhada (chave da NASA API)</summary>
       <div class="panel" style="margin-top:10px;">
         <p class="muted">Uma chave só, usada por TODOS os canais - inclusive os que você ainda vai
