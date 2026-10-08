@@ -32,6 +32,45 @@ OLLAMA_MODEL = "llama3.1"
 # português apesar de instruído a responder em inglês (ver build_daily_script).
 _PT_DIACRITICS_RE = re.compile(r"[áàãâéêíóôõúçÁÀÃÂÉÊÍÓÔÕÚÇ]")
 
+# Causa raiz REAL confirmada de "imagem sem nenhuma relação com o roteiro"
+# (relatado repetidamente pelo dono, investigado a fundo em 08/10/2026): a
+# busca da NASA (images-api.nasa.gov) faz casamento textual "fuzzy" no
+# índice, não busca semântica - um termo de imagem bonito/narrativo tipo
+# "Light-Year Expeditions" (sugerido pelo LLM pra um tema sobre distância
+# em anos-luz) bateu com fotos de tripulação da ISS catalogadas como
+# "Expedition Six"/"Expedition 11" só por causa da palavra "Expeditions",
+# sem NENHUMA relação com o assunto. O filtro CLIP (ver semantic.
+# filter_relevant_by_image) não pega isso: essas fotos de astronauta SÃO
+# fotos reais do espaço, então pontuam relevância visual genérica o
+# suficiente pra passar - o problema é textual/na origem da busca, não
+# visual, então a correção certa é não deixar esse tipo de palavra chegar a
+# virar termo de busca. Lista = palavras genéricas/narrativas que colidem
+# com nomenclatura real de arquivo da NASA (missões Expedition da ISS,
+# Apollo/Gemini/Mercury) - cobre o caso encontrado e a mesma família de erro.
+# "voyage"/"odyssey" ficam de fora de propósito: "Voyager" (nome próprio da
+# sonda) é uma busca ótima e não pode ser confundido com isso.
+_IMAGE_QUERY_COLLISION_WORDS = {
+    "expedition", "expeditions", "mission", "missions", "crew", "crews",
+    "spacewalk", "spacewalks", "journey", "journeys", "adventure", "adventures",
+    "exploration", "explorations", "odyssey", "odysseys", "voyage", "voyages",
+}
+_WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z'-]*")
+
+
+def _sanitize_image_query(query: str) -> str | None:
+    """Remove palavras de `_IMAGE_QUERY_COLLISION_WORDS` de `query` - se
+    sobrar algo (ex.: "Light-Year Expeditions" -> "Light-Year", termo que
+    por si só já busca bem), usa o resto; se a frase inteira era só
+    palavra(s) colidente(s) (nada sobra), retorna None - mais seguro não
+    buscar nada do que buscar com um termo conhecido por colidir."""
+    words = _WORD_RE.findall(query)
+    kept = [w for w in words if w.lower() not in _IMAGE_QUERY_COLLISION_WORDS]
+    if not kept:
+        return None
+    if len(kept) == len(words):
+        return query  # nada pra remover, devolve como veio (preserva pontuação/hífen original)
+    return " ".join(kept)
+
 
 def ollama_available() -> bool:
     """Checagem rápida (timeout curto) se o Ollama está de pé - usada pra
@@ -841,10 +880,28 @@ assuntos adjacentes/relacionados que ainda não estão na lista - contanto que f
 alinhados com a proposta do canal ("{niche}"). Não repita os temas recentes listados acima. Se
 houver perguntas/pedidos reais do público listados acima, priorize temas que respondam a eles.
 
+O termo de busca em inglês é usado pra buscar FOTOS REAIS da NASA/ESA (não é decorativo, é o que
+decide se o vídeo tem imagem de verdade) - a busca da NASA é por palavra-chave literal, não por
+significado, então:
+- Use o nome de um objeto, fenômeno, instrumento ou evento astronômico REAL E ESPECÍFICO, do jeito
+  que apareceria no arquivo da NASA - ex.: "black hole", "Saturn rings", "Orion nebula", "Voyager
+  2 Saturn", "solar eclipse", "Hubble Deep Field", "Jupiter storm".
+- NUNCA uma frase narrativa/poética/abstrata inventada pelo título do vídeo - ex.: NUNCA
+  "Light-Year Expeditions", "Gravitational Wave Phenomena", "Cosmic Journey Through Time": a NASA
+  não tem esse álbum, e o termo pode colidir por acaso com arquivo sem relação nenhuma (ex.:
+  "Expeditions" bateu com fotos de tripulação "Expedition Six" da Estação Espacial, nada a ver
+  com o tema pretendido).
+- NUNCA as palavras "expedition(s)", "mission(s)", "crew", "spacewalk", "journey", "adventure",
+  "exploration", "odyssey", "voyage" (sozinhas, fora de "Voyager") - colidem com nome de arquivo de
+  missão tripulada da NASA (ISS, Apollo) quase sempre sem relação com o tema do vídeo.
+- Se o tema em si não tem um objeto/fenômeno fotografável direto (ex.: um conceito físico abstrato),
+  escolha o elemento mais concreto e visual relacionado a ele (ex.: pra ondas gravitacionais, prefira
+  "black hole merger simulation" ou "LIGO detector" em vez de "gravitational waves" sozinho).
+
 Responda EXATAMENTE neste formato, sem texto antes ou depois:
 SUGESTOES:
-<rótulo do tema 1, em {language_name}> | <termo de busca em inglês 1>
-<rótulo do tema 2, em {language_name}> | <termo de busca em inglês 2>
+<rótulo do tema 1, em {language_name}> | <termo de busca em inglês 1, específico e fotografável>
+<rótulo do tema 2, em {language_name}> | <termo de busca em inglês 2, específico e fotografável>
 (... até {count} linhas)
 """
 
@@ -1183,7 +1240,19 @@ def _search_relevant_images(search_queries: list[str], relevance_reference: str,
     comentário em build_daily_script sobre por quê). Extraído como função
     própria pra ser reaproveitado tanto na geração do vídeo em si quanto na
     validação de sugestão de tema (suggest_topics) - mesma régua nos dois
-    lugares, sem duplicar a lógica."""
+    lugares, sem duplicar a lógica.
+
+    Sanitiza `search_queries` (ver _sanitize_image_query) AQUI DENTRO, no
+    único ponto por onde toda busca de imagem passa nos dois chamadores -
+    sem isso, suggest_topics() validava uma sugestão comparando as imagens
+    encontradas contra a MESMA frase que causou a busca ruim (circular: a
+    foto errada "passa" porque é comparada contra o termo que a achou
+    errado), o que deixou "Light-Year Expeditions" (colidiu com fotos de
+    "Expedition Six"/"Expedition 11" da ISS) ser validado e oferecido como
+    sugestão de tema - bug real relatado pelo dono, investigado em
+    08/10/2026."""
+    search_queries = [q for q in (_sanitize_image_query(q) for q in search_queries) if q]
+    relevance_reference = _sanitize_image_query(relevance_reference) or relevance_reference
     assets: list = []
     seen_paths = seen_paths if seen_paths is not None else set()
 
@@ -1323,6 +1392,11 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     # com o que tem do que não buscar nada - mas prioriza sempre os termos
     # que parecem inglês primeiro.
     search_queries = list(dict.fromkeys(english_keywords)) or list(dict.fromkeys(raw_keywords))
+    # Sanitização contra colisão de arquivo (_IMAGE_QUERY_COLLISION_WORDS)
+    # acontece dentro de _search_relevant_images, chamada logo abaixo - único
+    # ponto por onde toda busca de imagem passa (tema do dia, pedido sob
+    # demanda, sugestão de tema), corrige a causa raiz pros 3 caminhos de
+    # uma vez só.
 
     # Âncora de relevância ESTÁVEL pro vídeo inteiro, EM INGLÊS - 2 bugs reais
     # encontrados aqui, em sequência:
