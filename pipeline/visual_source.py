@@ -87,6 +87,46 @@ def search_nasa_images(query: str, media_type: str = "image", limit: int = 8) ->
     return items[:limit]
 
 
+# Causa raiz REAL investigada a fundo em 08/10/2026 (dono relatou repetidas
+# vezes imagem sem relação com o roteiro, mesmo depois do filtro CLIP já
+# existir): a NASA Images API é um arquivo histórico GIGANTE, não um banco
+# só de astronomia - qualquer termo de busca minimamente genérico também
+# devolve décadas de fotos institucionais (processamento de espaçonave,
+# emblema de missão, evento de imprensa, memorial de desastre) que SÃO fotos
+# reais do "espaço"/"NASA" o bastante pra passar no filtro visual CLIP (que
+# só checa "isso parece foto real de astronomia", não "isso é SOBRE o tema
+# certo"). Caso real confirmado: busca por "Columbia Memories" devolveu como
+# 1º resultado o memorial do desastre do ônibus espacial Columbia (STS-107) -
+# tecnicamente uma "foto real da NASA", nada a ver com o roteiro, e um
+# conteúdo sensível demais pra aparecer sem contexto num vídeo que não é
+# sobre isso.
+#
+# Esse tipo de foto SEMPRE vem com metadado textual que entrega a categoria
+# (a API devolve `keywords`/`description` além do título, mas o código só
+# usava o título) - filtra pela CATEGORIA do conteúdo (administrativo/
+# institucional/histórico), não pelo tema buscado, então funciona pra
+# QUALQUER termo de busca, não só os já vistos. Validado contra 7 buscas
+# reais que causaram imagem errada (Columbia Memories, Pathfinder Journey,
+# Pioneer Spirit, Challenger Mindset etc.) e 10 buscas boas conhecidas
+# (black hole, Orion nebula, Voyager, Hubble Deep Field etc.) - zero falso
+# positivo nas boas, maioria das ruins bloqueada.
+_NON_ASTRONOMY_CONTENT_MARKERS = (
+    "patch", "insignia", "logo", "memorial", "disaster", "tragedy",
+    "processing facilit", "spacecraft processing", "media event",
+    "press conference", "crew portrait", "faces of nasa", "clean room",
+    "mission patch",
+)
+
+
+def _is_non_astronomy_content(data: dict) -> bool:
+    text = " ".join([
+        data.get("title") or "",
+        " ".join(data.get("keywords") or []),
+        (data.get("description") or "")[:300],
+    ]).lower()
+    return any(marker in text for marker in _NON_ASTRONOMY_CONTENT_MARKERS)
+
+
 def _download(url: str, dest: Path) -> Path:
     response = _get_with_retry(url, timeout=60)
     # Escrita atômica - o cache dessa imagem é considerado "pronto" só por
@@ -99,10 +139,18 @@ def _download(url: str, dest: Path) -> Path:
 
 
 def fetch_nasa_images_for_topic(topic: str, count: int = 6) -> list[VisualAsset]:
-    items = search_nasa_images(topic, media_type="image", limit=count)
+    # Pede mais candidatos do que `count` - uma fração vai ser descartada
+    # pelo filtro de categoria (_is_non_astronomy_content) antes de virar
+    # asset, então pedir exatamente `count` deixaria o vídeo com menos
+    # imagens do que devia sempre que a busca tiver ruído institucional.
+    items = search_nasa_images(topic, media_type="image", limit=min(count * 3, 20))
     assets = []
     for item in items:
+        if len(assets) >= count:
+            break
         data = item["data"][0]
+        if _is_non_astronomy_content(data):
+            continue
         nasa_id = data["nasa_id"]
         title = data.get("title", topic)
         # cada item tem um "href" pra um manifesto JSON com as URLs dos arquivos
@@ -132,10 +180,14 @@ def fetch_nasa_videos_for_topic(topic: str, count: int = 2) -> list[VisualAsset]
     que entra em `local_path` (usado só pra checagem de relevância/tipo via
     CLIP, que não processa vídeo); o .mp4 de verdade fica em `video_path`,
     usado na montagem final."""
-    items = search_nasa_images(topic, media_type="video", limit=count)
+    items = search_nasa_images(topic, media_type="video", limit=min(count * 3, 20))
     assets = []
     for item in items:
+        if len(assets) >= count:
+            break
         data = item["data"][0]
+        if _is_non_astronomy_content(data):
+            continue
         nasa_id = data["nasa_id"]
         title = data.get("title", topic)
         try:

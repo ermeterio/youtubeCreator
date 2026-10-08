@@ -1086,7 +1086,13 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
         if any(title.lower() in r.lower() or r.lower() in title.lower() for r in recent):
             continue
 
-        keywords = _news_image_keywords(title)
+        # Sanitiza aqui também - este caminho (notícia real) busca imagem
+        # chamando os fetchers diretamente, por fora de _search_relevant_
+        # images (motivo: filtra keyword por keyword, fonte por fonte, numa
+        # ordem específica que o choke point central não modela) - sem isso
+        # ficaria o único caminho desprotegido contra colisão de arquivo
+        # (ver _sanitize_image_query).
+        keywords = [k for k in (_sanitize_image_query(k) for k in _news_image_keywords(title)) if k]
         if not keywords:
             continue
 
