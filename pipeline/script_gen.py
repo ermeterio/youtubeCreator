@@ -1174,6 +1174,14 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
             if len(assets) >= 4:
                 break
             try:
+                found = visual_source.fetch_esa_webb_images_for_topic(kw, count=4 - len(assets))
+                _collect(semantic.filter_relevant_by_image(title, found))
+            except Exception:
+                pass
+        for kw in keywords:
+            if len(assets) >= 4:
+                break
+            try:
                 found = visual_source.fetch_eso_images_for_topic(kw, count=4 - len(assets))
                 _collect(semantic.filter_relevant_by_image(title, found))
             except Exception:
@@ -1320,6 +1328,7 @@ def _search_relevant_images(search_queries: list[str], relevance_reference: str,
     fetchers = [
         visual_source.fetch_nasa_images_for_topic,
         visual_source.fetch_esa_hubble_images_for_topic,
+        visual_source.fetch_esa_webb_images_for_topic,
         visual_source.fetch_eso_images_for_topic,
         visual_source.fetch_noirlab_images_for_topic,
     ]

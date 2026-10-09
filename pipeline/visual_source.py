@@ -9,14 +9,18 @@
 - NASA APOD (api.nasa.gov): precisa de chave gratuita (NASA_API_KEY), retorna
   a imagem do dia + uma explicação em texto que serve de base factual real
   para o roteiro - não é só imagem, é também fonte de conteúdo.
-- ESA/Hubble (esahubble.org/images/json/), ESO (eso.org/public/images/json/)
-  e NOIRLab (noirlab.edu/public/images/json/): mesmo endpoint JSON não
-  documentado oficialmente (mesma plataforma de divulgação compartilhada
-  entre esses observatórios), público e funcional, sem chave. Licença CC BY
-  4.0 nas três (uso comercial ok, exige crédito visível, não pode insinuar
-  endosso do observatório). Confirmado por consulta real aos três endpoints
-  em 30/09/2026 - todos devolvem o mesmo formato (`formats_url.screen`,
-  `ID`, `Credit`, `Title`), então usam o mesmo código de busca.
+- ESA/Hubble (esahubble.org/images/json/), ESA/Webb (esawebb.org/images/json/),
+  ESO (eso.org/public/images/json/) e NOIRLab (noirlab.edu/public/images/json/):
+  mesmo endpoint JSON não documentado oficialmente (mesma plataforma de
+  divulgação compartilhada entre esses observatórios), público e funcional,
+  sem chave. Licença CC BY 4.0 nas quatro (uso comercial ok, exige crédito
+  visível, não pode insinuar endosso do observatório). Confirmado por consulta
+  real aos endpoints em 30/09/2026 (Hubble/ESO/NOIRLab) e 09/10/2026 (Webb) -
+  todos devolvem o mesmo formato (`formats_url.screen`, `ID`, `Credit`,
+  `Title`), então usam o mesmo código de busca. Webb adicionado por render
+  conteúdo genuinamente DIFERENTE do Hubble (infravermelho, alvos/
+  processamento distintos), não um espelho - vale como 5ª fonte, não
+  redundância.
 
 Não encontrei API pública equivalente (busca por palavra-chave, JSON) para
 outras agências espaciais (JAXA, ISRO, Roscosmos, CSA etc.) - se isso mudar,
@@ -39,6 +43,7 @@ from pipeline.atomic_io import atomic_write_bytes
 NASA_IMAGES_SEARCH_URL = "https://images-api.nasa.gov/search"
 NASA_APOD_URL = "https://api.nasa.gov/planetary/apod"
 ESA_HUBBLE_SEARCH_URL = "https://esahubble.org/images/json/"
+ESA_WEBB_SEARCH_URL = "https://esawebb.org/images/json/"
 ESO_SEARCH_URL = "https://www.eso.org/public/images/json/"
 NOIRLAB_SEARCH_URL = "https://noirlab.edu/public/images/json/"
 SPACEFLIGHT_NEWS_URL = "https://api.spaceflightnewsapi.net/v4/articles/"
@@ -270,6 +275,10 @@ def _fetch_avm_images_for_topic(search_url: str, prefix: str, default_credit: st
 
 def fetch_esa_hubble_images_for_topic(query: str, count: int = 6) -> list[VisualAsset]:
     return _fetch_avm_images_for_topic(ESA_HUBBLE_SEARCH_URL, "esahubble", "ESA/Hubble", query, count)
+
+
+def fetch_esa_webb_images_for_topic(query: str, count: int = 6) -> list[VisualAsset]:
+    return _fetch_avm_images_for_topic(ESA_WEBB_SEARCH_URL, "esawebb", "ESA/Webb", query, count)
 
 
 def fetch_eso_images_for_topic(query: str, count: int = 6) -> list[VisualAsset]:
