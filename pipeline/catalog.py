@@ -105,6 +105,27 @@ CREATE TABLE IF NOT EXISTS series_playlists (
     youtube_playlist_id TEXT NOT NULL,
     UNIQUE(channel_id, series)
 );
+
+-- Processo contínuo de monitoramento de qualidade de imagem (pedido do
+-- dono em 09/10/2026, "ainda não estou contente com este" - precisa virar
+-- processo, não só correção pontual toda vez que ele reclamar de novo).
+-- Registra o score REAL (CLIP) de cada imagem que ENTROU no vídeo (depois
+-- de todos os filtros - sanitização de query, categoria de conteúdo,
+-- relevância visual) - não é mais um dado jogado fora depois da geração,
+-- vira histórico consultável (ver pipeline.health.image_quality_report)
+-- pra enxergar tendência/regressão ANTES do dono precisar notar e
+-- reclamar de novo.
+CREATE TABLE IF NOT EXISTS image_relevance_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    asset_title TEXT,
+    asset_credit TEXT,
+    query TEXT NOT NULL,
+    relevance_score REAL NOT NULL,
+    photo_vs_graphic_diff REAL,
+    created_at TEXT NOT NULL
+);
 """
 
 # Colunas adicionadas depois da criação inicial da tabela - CREATE TABLE IF
@@ -489,3 +510,54 @@ def update_schedule_day(channel_id: int, weekday: int, enabled: bool, topic_mode
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (channel_id, weekday, int(enabled), topic_mode, topic_label, topic_query, voice),
             )
+
+
+def record_image_relevance(track_id: int, channel_id: int, entries: list[dict]) -> None:
+    """Registra o score CLIP de cada imagem que entrou no vídeo (depois de
+    todos os filtros) - histórico consultável pra enxergar tendência de
+    qualidade de imagem ao longo do tempo, em vez de só reagir quando o
+    dono reclama de novo (ver pipeline.health.image_quality_report).
+    `entries`: [{"title", "credit", "query", "score", "photo_diff"}, ...].
+    Best-effort por natureza (quem chama decide se falha aqui deve
+    derrubar a geração - normalmente não deve)."""
+    if not entries:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        conn.executemany(
+            "INSERT INTO image_relevance_log "
+            "(track_id, channel_id, asset_title, asset_credit, query, relevance_score, photo_vs_graphic_diff, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (track_id, channel_id, e.get("title"), e.get("credit"), e["query"],
+                 e["score"], e.get("photo_diff"), now)
+                for e in entries
+            ],
+        )
+
+
+def image_relevance_for_track(track_id: int) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM image_relevance_log WHERE track_id = ? ORDER BY id", (track_id,)
+        ).fetchall()
+
+
+def recent_image_relevance_summary(channel_id: int, limit_tracks: int = 25) -> list[sqlite3.Row]:
+    """Média e mínimo de score por track, dos últimos `limit_tracks` vídeos
+    que têm registro - base do relatório de qualidade de imagem (ver
+    pipeline.health.image_quality_report). Tracks de antes dessa tabela
+    existir simplesmente não aparecem (sem dado retroativo pra inventar)."""
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT track_id, MIN(relevance_score) AS min_score, AVG(relevance_score) AS avg_score,
+                   COUNT(*) AS image_count, MAX(created_at) AS created_at
+            FROM image_relevance_log
+            WHERE channel_id = ?
+            GROUP BY track_id
+            ORDER BY MAX(id) DESC
+            LIMIT ?
+            """,
+            (channel_id, limit_tracks),
+        ).fetchall()

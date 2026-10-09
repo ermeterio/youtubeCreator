@@ -2194,6 +2194,33 @@ def video_detail(track_id: int):
     has_local_files = has_video or has_short or has_thumb or bool(track["narration_path"])
     has_remote = bool(track["youtube_video_id"]) or bool(track["youtube_short_video_id"])
 
+    # Processo contínuo de monitoramento de qualidade de imagem (pedido do
+    # dono em 09/10/2026) - mostra o score real (CLIP) de cada imagem bem
+    # no lugar onde ele já revisa o vídeo antes de aprovar, não escondido
+    # num relatório separado que ele precisaria lembrar de abrir.
+    from pipeline import semantic as _semantic
+    relevance_rows = catalog.image_relevance_for_track(track_id)
+    if relevance_rows:
+        warn_threshold = _semantic.MIN_VISUAL_RELEVANCE_SCORE + 0.04
+        rows_html = "".join(
+            f"""<tr>
+                  <td>{escape(r['asset_title']) if r['asset_title'] else '(sem título)'}</td>
+                  <td class="muted">{escape(r['asset_credit'] or '')}</td>
+                  <td>{'✅' if r['relevance_score'] >= warn_threshold else '⚠️'} {r['relevance_score']:.3f}</td>
+                </tr>"""
+            for r in relevance_rows
+        )
+        avg_score = sum(r["relevance_score"] for r in relevance_rows) / len(relevance_rows)
+        image_relevance_panel = f"""
+        <h3>Relevância das imagens (score automático)</h3>
+        <p class="muted">Quanto o CLIP considera cada imagem visualmente relacionada ao tema do vídeo
+        (piso mínimo pra entrar no vídeo: {_semantic.MIN_VISUAL_RELEVANCE_SCORE:.2f}). Média: {avg_score:.3f}.
+        ⚠️ não significa que a imagem está errada - é só "perto do piso", vale um segundo olhar.</p>
+        <table><tr><th>Imagem</th><th>Crédito</th><th>Score</th></tr>{rows_html}</table>
+        """
+    else:
+        image_relevance_panel = ""
+
     delete_section = f"""
     <div class="panel warn">
       <h3 style="margin-top:0; color: var(--missing-fg);">Zona de exclusão</h3>
@@ -2240,6 +2267,8 @@ def video_detail(track_id: int):
         {thumb_img}
       </div>
     </div>
+
+    {image_relevance_panel}
 
     <h3>Roteiro (o que será narrado)</h3>
     <div class="script-box">{track['script']}</div>

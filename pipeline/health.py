@@ -209,3 +209,50 @@ def audit_channel_sameness(limit_per_channel: int = 25) -> list[str]:
             )
 
     return warnings
+
+
+# Margem acima do piso mínimo (semantic.MIN_VISUAL_RELEVANCE_SCORE = 0.20)
+# usada só pra FLAGGAR um vídeo recente como "valeria revisar de novo" -
+# score médio bem perto do piso mínimo passa no filtro, mas é o tipo de
+# caso onde a imagem pode estar tecnicamente relacionada sem ser a melhor
+# ilustração possível. Não bloqueia nada, só sinaliza (parte do processo
+# contínuo de monitoramento de qualidade de imagem pedido pelo dono,
+# 09/10/2026 - "ainda não estou contente com este" - precisa virar sinal
+# PROATIVO, não só reagir quando o dono reclamar de novo).
+IMAGE_QUALITY_WARN_MARGIN = 0.04
+
+
+def image_quality_report(limit_per_channel: int = 10) -> list[str]:
+    """Verifica os vídeos mais recentes de cada canal (que já têm score de
+    relevância de imagem registrado - ver catalog.record_image_relevance) e
+    sinaliza qualquer um com score médio ou mínimo perto demais do piso
+    mínimo do filtro CLIP - não é erro, é um "vale revisar com atenção
+    redobrada" preventivo. Também calcula a MÉDIA do canal inteiro na
+    amostra, pra enxergar tendência de regressão ao longo do tempo, não só
+    vídeo a vídeo."""
+    warnings = []
+    for channel in channels.list_channels(active_only=True):
+        summary = catalog.recent_image_relevance_summary(channel["id"], limit_tracks=limit_per_channel)
+        if not summary:
+            continue
+
+        warn_threshold = semantic.MIN_VISUAL_RELEVANCE_SCORE + IMAGE_QUALITY_WARN_MARGIN
+        flagged = [row for row in summary if row["avg_score"] < warn_threshold]
+        channel_avg = sum(row["avg_score"] for row in summary) / len(summary)
+
+        notify.log(
+            f"[{channel['name']}] Qualidade de imagem: média de {channel_avg:.3f} nos últimos "
+            f"{len(summary)} vídeo(s) com dado registrado (piso do filtro: "
+            f"{semantic.MIN_VISUAL_RELEVANCE_SCORE:.2f})."
+        )
+        if flagged:
+            track_ids = ", ".join(str(row["track_id"]) for row in flagged)
+            msg = (
+                f"[{channel['name']}] Qualidade de imagem: {len(flagged)} vídeo(s) recente(s) "
+                f"(track {track_ids}) com score médio perto do piso mínimo - vale conferir se as "
+                "imagens realmente combinam com o roteiro antes de publicar."
+            )
+            notify.log(msg)
+            warnings.append(msg)
+
+    return warnings

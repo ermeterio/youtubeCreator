@@ -144,6 +144,15 @@ def prepare_daily_video(channel_id: int | None = None, forced_topic: tuple[str, 
         track_id = catalog.create_track(title, topic, script, ", ".join(credits), channel_id=channel["id"])
         catalog.update_track(track_id, fact_check_flag=fact_check, fact_check_details=fact_check_details, series=series)
 
+        # Processo contínuo de monitoramento de qualidade de imagem (pedido
+        # do dono em 09/10/2026) - registra o score real de cada imagem que
+        # entrou nesse vídeo, pra dar pra ver tendência/regressão depois em
+        # vez de só reagir quando o dono reclama de novo.
+        try:
+            catalog.record_image_relevance(track_id, channel["id"], result.get("image_relevance") or [])
+        except Exception as exc:
+            notify.log(f"[{channel['name']}] Falha ao registrar relevância de imagem (não bloqueia a geração): {exc}")
+
         # Segunda passada do LLM simulando um espectador leigo - sinaliza
         # trechos confusos/redundantes ANTES da revisão humana, sem travar o
         # pipeline se o Ollama não responder.
@@ -291,6 +300,7 @@ def run_all_active_channels() -> list[int]:
         health.check_channels_health()
         health.run_thumbnail_ab_tests()
         health.audit_channel_sameness()
+        health.image_quality_report()
     except Exception as exc:
         notify.log(f"Checagem de saúde dos canais falhou (não bloqueia a geração): {exc}")
 

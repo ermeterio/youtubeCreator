@@ -1540,6 +1540,24 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
     rest = _order_by_segment_relevance(rest, generated["script"], search_queries)
     assets = ([anchor] if anchor else []) + rest
 
+    # Score REAL (CLIP) de cada imagem que ENTROU no vídeo, contra a mesma
+    # âncora de relevância usada pra filtrar - parte do processo contínuo de
+    # monitoramento de qualidade de imagem pedido pelo dono (09/10/2026, ver
+    # catalog.record_image_relevance/health.image_quality_report). Calculado
+    # aqui (estado FINAL dos assets, depois de toda reordenação) pra refletir
+    # exatamente o que o espectador vê, não um score intermediário de algum
+    # candidato que acabou não sendo usado. Fail-open: nunca impede o vídeo
+    # de ser gerado se o CLIP não carregar.
+    image_relevance = []
+    try:
+        for score, photo_diff, asset in semantic.score_images(relevance_reference, assets):
+            image_relevance.append({
+                "title": asset.title, "credit": asset.credit, "query": relevance_reference,
+                "score": score, "photo_diff": photo_diff,
+            })
+    except Exception:
+        pass
+
     return {
         "title": generated["title"],
         "script": generated["script"],
@@ -1554,6 +1572,7 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         # embeddings é só-inglês; comparar com `topic` em português não
         # funciona de verdade).
         "image_search_terms": relevance_reference,
+        "image_relevance": image_relevance,
     }
 
 
