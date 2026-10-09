@@ -237,13 +237,31 @@ ROTEIRO_REVISADO: <roteiro corrigido completo, pronto pra narração>
 """
 
 
+# Acha o fim da 1ª frase com segurança o bastante pra comparação de
+# guarda-corpo (ver strengthen_hook) - exige pelo menos 15 caracteres antes
+# da pontuação de fim de frase, pra não cortar em abreviação/decimal logo no
+# início ("Dr. Fulano", "3.5 km"). Usado só pra achar onde "o resto" do
+# roteiro ORIGINAL começa - não precisa ser perfeito pra toda frase do
+# texto, só a primeira.
+_SENTENCE_END_RE = re.compile(r"[.!?]+(?=\s|$)")
+
+
+def _first_sentence_end(text: str) -> int | None:
+    for m in _SENTENCE_END_RE.finditer(text):
+        if m.end() >= 15:
+            return m.end()
+    return None
+
+
 HOOK_TEMPLATE = """Você é editor de roteiros de vídeo do YouTube sobre {niche}, especializado em
 RETENÇÃO de audiência (prática validada: abertura com "pattern interrupt" nos primeiros segundos
 aumenta retenção média em ~23% vs abertura genérica/estática).
 
 Avalie a ABERTURA do roteiro abaixo (a 1ª frase, no máximo as 2 primeiras) contra isto: ela é uma
 introdução genérica/morna tipo "Hoje vamos falar sobre...", "Você sabia que X é fascinante?" ou
-"Vamos explorar..."? Se SIM, reescreva SÓ essa primeira frase pra algo mais direto e intrigante.
+"Vamos explorar..."? Se SIM, reescreva SÓ essa primeira frase pra algo mais direto e intrigante,
+SEGUINDO ESTE ESTILO ESPECÍFICO de abertura (não troque por outro estilo - variar o estilo entre
+vídeos é importante pro canal não parecer "roteiro-padrão" pro YouTube): {angle}
 
 REGRA MAIS IMPORTANTE, NÃO QUEBRE: você só pode REORDENAR/REESCREVER fatos que JÁ ESTÃO no roteiro
 original. PROIBIDO inventar qualquer fato, número, imagem, descoberta ou detalhe que não esteja
@@ -264,7 +282,7 @@ ROTEIRO_REVISADO: <roteiro completo, com ou sem mudança na 1ª frase>
 """
 
 
-def strengthen_hook(script: str, niche: str = "ciência") -> str:
+def strengthen_hook(script: str, niche: str = "ciência", angle: str | None = None) -> str:
     """Passada de revisão ESPECÍFICA da abertura (primeiros segundos) do
     roteiro, feita pelo Llama depois do polish_script - prática validada de
     retenção de audiência (pattern interrupt), não uma correção de texto
@@ -274,8 +292,17 @@ def strengthen_hook(script: str, niche: str = "ciência") -> str:
     descoberto" sem isso estar no roteiro original) - isso é desinformação,
     não estilo. Além do range de tamanho, exige que tudo DEPOIS da 1ª frase
     continue literalmente igual ao original; qualquer divergência rejeita a
-    revisão inteira e mantém o roteiro original."""
-    prompt = HOOK_TEMPLATE.format(script=script, niche=niche)
+    revisão inteira e mantém o roteiro original.
+
+    `angle` é o MESMO estilo de abertura (um de PROMPT_ANGLES) já pedido na
+    geração original - achado real (auditoria de "sameness" de 09/10/2026:
+    96% dos últimos 25 vídeos com roteiro/gancho muito parecidos): sem isso,
+    essa reescrita não sabia qual dos 4 estilos o roteiro original tentou
+    seguir e convergia sempre pro MESMO jeito "impactante" favorito do LLM,
+    cancelando na prática a variedade que PROMPT_ANGLES foi criado pra dar -
+    a causa raiz real da sameness, não só coincidência de tema parecido."""
+    angle = angle or random.choice(PROMPT_ANGLES)
+    prompt = HOOK_TEMPLATE.format(script=script, niche=niche, angle=angle)
     text = _call_ollama(prompt, timeout=90)
     if not text or not _has_marker(text, "ROTEIRO_REVISADO:"):
         return script
@@ -285,11 +312,33 @@ def strengthen_hook(script: str, niche: str = "ciência") -> str:
         return script
 
     # O resto do roteiro (tudo depois da 1ª frase) precisa continuar
-    # LITERALMENTE igual ao original - só a abertura pode mudar. Compara
-    # pelo final dos dois textos (mais robusto que achar a "1ª frase" por
-    # pontuação, que pode falhar com abreviação/decimal).
-    tail_len = min(len(script), len(revised)) - 40
-    if tail_len > 0 and script[-tail_len:] != revised[-tail_len:]:
+    # LITERALMENTE igual ao original - só a abertura pode mudar.
+    #
+    # Bug real encontrado (09/10/2026, ao investigar por que a reescrita de
+    # gancho quase nunca parecia acontecer de verdade): a comparação antiga
+    # usava uma fatia de tamanho FIXO a partir do fim dos dois textos
+    # (min(len(script), len(revised)) - 40) - funciona só se a nova 1ª frase
+    # tiver quase o MESMO tamanho da original. Mas o pedido aqui é
+    # justamente REESCREVER a abertura (ex.: virar pergunta, ganhar uma
+    # comparação de escala) - o tamanho muda com frequência bem mais que 40
+    # caracteres, e nesse caso a fatia de 40 chars de "margem" não cobria a
+    # diferença, incluía pedacinho do FIM da 1ª frase de cada lado (que são
+    # diferentes por construção), e a reescrita era rejeitada mesmo sendo
+    # 100% correta - silenciosamente, sem log. Testado contra um caso real:
+    # "Hoje vamos falar sobre..." (curto) reescrito como pergunta de 84
+    # caracteres era sempre descartado por isso.
+    #
+    # Correção: acha o fim da 1ª frase SÓ no roteiro ORIGINAL (não precisa
+    # achar no revisado) e compara exatamente esse tanto de caracteres a
+    # partir do fim - não depende do tamanho da nova abertura.
+    split_point = _first_sentence_end(script)
+    if split_point is None:
+        # Não achou com segurança onde a 1ª frase termina (texto estranho,
+        # sem pontuação clara) - mais seguro recusar a reescrita do que
+        # arriscar comparar errado.
+        return script
+    script_rest = script[split_point:]
+    if not revised.endswith(script_rest):
         return script
     return revised
 
@@ -1373,7 +1422,7 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
         # Reforça o gancho de abertura (retenção) DEPOIS do polish (texto já
         # limpo) e ANTES do fact-check (precisa validar a versão final, que
         # pode ter a abertura reescrita).
-        generated["script"] = strengthen_hook(generated["script"], niche)
+        generated["script"] = strengthen_hook(generated["script"], niche, angle=angle)
         fact_check, fact_check_details = _fact_check(generated["script"], facts)
 
     # Um vídeo longo com uma imagem só fica monótono. Busca por várias
