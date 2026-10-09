@@ -119,6 +119,33 @@ def is_real_photo(path, min_diff: float = MIN_PHOTO_VS_GRAPHIC_DIFF) -> bool:
     return _cosine(photo_vec, img_vec) - _cosine(graphic_vec, img_vec) >= min_diff
 
 
+def score_images(query_en: str, candidates: list, path_fn=lambda c: c.local_path) -> list[tuple[float, float, object]]:
+    """Pontua CADA candidato contra `query_en` (CLIP, sempre inglês) - devolve
+    (score_relevância, diff_foto_vs_gráfico, candidato) pra TODOS, sem filtrar
+    nem ordenar (quem decide o corte/ordem é o chamador: filter_relevant_by_
+    image aplica o piso + rejeita gráfico; o orchestrator usa os scores brutos
+    pra registrar no banco, ver catalog.record_image_relevance). Extraído de
+    filter_relevant_by_image pra não calcular o mesmo embedding duas vezes
+    quando os dois usos (filtrar E registrar) acontecem pro mesmo lote.
+    Levanta exceção se o modelo CLIP não carregar - quem quiser fail-open
+    (like filter_relevant_by_image) precisa envolver num try/except."""
+    if not candidates:
+        return []
+    img_model = _get_image_model()
+    txt_model = _get_clip_text_model()
+    paths = [str(path_fn(c)) for c in candidates]
+    img_vectors = list(img_model.embed(paths))
+    query_vec = list(txt_model.embed([query_en]))[0]
+    photo_vec, graphic_vec = list(txt_model.embed([_PHOTO_REFERENCE, _GRAPHIC_REFERENCE]))
+
+    results = []
+    for candidate, vec in zip(candidates, img_vectors):
+        score = _cosine(query_vec, vec)
+        photo_diff = _cosine(photo_vec, vec) - _cosine(graphic_vec, vec)
+        results.append((score, photo_diff, candidate))
+    return results
+
+
 def filter_relevant_by_image(query_en: str, candidates: list, path_fn=lambda c: c.local_path,
                               min_score: float = MIN_VISUAL_RELEVANCE_SCORE) -> list:
     """Filtra `candidates` comparando o CONTEÚDO REAL de cada imagem (via
@@ -132,23 +159,24 @@ def filter_relevant_by_image(query_en: str, candidates: list, path_fn=lambda c: 
     if not candidates:
         return []
     try:
-        img_model = _get_image_model()
-        txt_model = _get_clip_text_model()
-        paths = [str(path_fn(c)) for c in candidates]
-        img_vectors = list(img_model.embed(paths))
-        query_vec = list(txt_model.embed([query_en]))[0]
-        photo_vec, graphic_vec = list(txt_model.embed([_PHOTO_REFERENCE, _GRAPHIC_REFERENCE]))
+        scored = score_images(query_en, candidates, path_fn)
     except Exception:
         return candidates
 
-    kept = []
-    for candidate, vec in zip(candidates, img_vectors):
-        if _cosine(query_vec, vec) < min_score:
-            continue
-        if _cosine(photo_vec, vec) - _cosine(graphic_vec, vec) < MIN_PHOTO_VS_GRAPHIC_DIFF:
-            continue
-        kept.append(candidate)
-    return kept
+    kept = [
+        (score, candidate) for score, photo_diff, candidate in scored
+        if score >= min_score and photo_diff >= MIN_PHOTO_VS_GRAPHIC_DIFF
+    ]
+    # Ordenado por score DESCENDENTE (melhor match primeiro) - antes a ordem
+    # era só "a ordem em que a API devolveu", então quando uma busca achava
+    # mais candidatos do que o vídeo precisa (target_count), os primeiros N
+    # na ordem de chegada ficavam, não necessariamente os N mais relevantes
+    # de verdade. Parte do processo de melhoria contínua de seleção de
+    # imagem pedido pelo dono (09/10/2026) - "melhor" deixa de ser só
+    # "passou do piso mínimo" e passa a importar de verdade quando sobra
+    # candidato.
+    kept.sort(key=lambda item: item[0], reverse=True)
+    return [candidate for _, candidate in kept]
 
 
 def average_visual_relevance(query_en: str, candidates: list, path_fn=lambda c: c.local_path) -> float | None:
