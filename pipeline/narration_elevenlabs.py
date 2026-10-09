@@ -97,3 +97,24 @@ def check_key_valid(api_key: str) -> bool:
         return response.status_code == 200
     except requests.RequestException:
         return False
+
+
+def remaining_quota(api_key: str) -> tuple[int, int] | None:
+    """(caracteres usados, limite do ciclo) do plano ElevenLabs - consulta
+    `/v1/user`, que NÃO consome cota de texto-pra-fala (diferente de uma
+    chamada de síntese real). Usado pra decidir ANTES de tentar sintetizar
+    se vale a pena gastar uma chamada - achado real (09/10/2026): toda
+    narração tentava a ElevenLabs primeiro, levava 401 porque a cota mensal
+    do plano grátis (10.000 caracteres) já tinha estourado, e só então caía
+    pro edge-tts - desperdiçando uma chamada de API (e alguns segundos) em
+    TODA narração do mês, com um erro genérico no log que não dizia que era
+    só cota, não chave quebrada. Retorna None se a consulta falhar (fail-
+    open: deixa o chamador tentar a síntese normalmente, que vai falhar e
+    cair pro edge-tts do jeito de sempre, só sem o diagnóstico extra)."""
+    try:
+        response = requests.get(f"{API_BASE}/user", headers={"xi-api-key": api_key}, timeout=15)
+        response.raise_for_status()
+        data = response.json().get("subscription", {})
+        return data["character_count"], data["character_limit"]
+    except Exception:
+        return None

@@ -1138,6 +1138,24 @@ def _elevenlabs_panel(channel_id: int, ch) -> str:
                 for v in voices
             )
             key_status = f'<p class="muted">✅ Chave válida - {len(voices)} vozes disponíveis na sua conta.</p>'
+            # Achado real (09/10/2026): a chave ficava "válida" aqui (a
+            # checagem só confirma que a chave abre a conta) enquanto a cota
+            # de texto-pra-fala do mês já estava esgotada - ElevenLabs nunca
+            # era de fato usada, caindo pro edge-tts toda vez, sem o dono
+            # perceber porque esta tela nunca mostrava a cota em si.
+            quota = narration_elevenlabs.remaining_quota(api_key)
+            if quota is not None:
+                used, limit = quota
+                used_fmt, limit_fmt = f"{used:,}".replace(",", "."), f"{limit:,}".replace(",", ".")
+                pct = (used / limit * 100) if limit else 0
+                if pct >= 90:
+                    key_status += (
+                        f'<p class="muted">⚠️ Cota do mês quase esgotada ({used_fmt}/{limit_fmt} caracteres, '
+                        f'{pct:.0f}%) - novas narrações estão caindo pro edge-tts gratuito até o ciclo '
+                        'renovar ou você ampliar o plano.</p>'
+                    )
+                else:
+                    key_status += f'<p class="muted">Cota do mês: {used_fmt}/{limit_fmt} caracteres usados ({pct:.0f}%).</p>'
         except Exception as exc:
             key_status = f'<p class="muted">⚠️ Não consegui validar a chave agora ({exc}) - confira se está correta.</p>'
 

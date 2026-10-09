@@ -97,8 +97,24 @@ def generate_narration_for_channel(text: str, output_path: Path, channel,
     voice_id = channel["elevenlabs_voice_id"] if "elevenlabs_voice_id" in channel.keys() else None
 
     if provider == "elevenlabs" and api_key and voice_id:
+        from pipeline import narration_elevenlabs
+        # Checa a cota ANTES de tentar sintetizar - consulta leve (não gasta
+        # cota de texto-pra-fala) que evita gastar uma chamada de síntese
+        # inteira só pra descobrir, pela 401, que a cota do mês já estourou
+        # (ver narration_elevenlabs.remaining_quota). Sem isso, TODA
+        # narração do mês tentava a ElevenLabs e falhava, com um log
+        # genérico que não dizia que era "só" cota, não chave quebrada.
+        quota = narration_elevenlabs.remaining_quota(api_key)
+        if quota is not None:
+            used, limit = quota
+            if used + len(text) > limit:
+                notify.log(
+                    f"[narração] ElevenLabs: cota do mês praticamente esgotada ({used}/{limit} "
+                    "caracteres) - usando edge-tts gratuito até o ciclo renovar ou a cota ser "
+                    "ampliada. Isso não é um erro de configuração."
+                )
+                return generate_narration_with_boundaries(text, output_path, voice=voice, rate=rate, pitch=pitch)
         try:
-            from pipeline import narration_elevenlabs
             return narration_elevenlabs.synthesize_with_boundaries(text, output_path, api_key, voice_id)
         except Exception as exc:
             notify.log(
