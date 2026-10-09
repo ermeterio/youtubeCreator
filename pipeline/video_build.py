@@ -455,6 +455,20 @@ def build_video(narration_path: Path, title: str, assets: list[VisualAsset], out
         codec="libx264",
         audio_codec="aac",
         threads=4,
+        # Bug real em produção (relatado pelo dono, investigado 09/10/2026):
+        # sem isso, o MoviePy escreve o áudio temporário num nome RELATIVO
+        # ("video.tmpTEMP_MPY_wvf_snd.mp4"), resolvido contra o diretório de
+        # trabalho do PROCESSO, não contra a pasta do vídeo - como a thread
+        # da fila sob demanda e a execução agendada do dia (run_daily.py)
+        # compartilham o mesmo cwd, dois vídeos sendo montados ao mesmo
+        # tempo (um por cada caminho) colidiam no mesmo nome de arquivo
+        # temporário, e o Windows recusa apagar/reescrever um arquivo que o
+        # OUTRO processo ainda tem aberto (WinError 32) - causou falha
+        # DEFINITIVA (4 tentativas esgotadas) em 4 vídeos diferentes na
+        # mesma madrugada. Forçar o áudio temporário pra dentro da pasta
+        # (única por track) do próprio vídeo elimina a colisão: cada
+        # processo escreve num arquivo com caminho completo e exclusivo.
+        temp_audiofile_path=str(tmp_path.parent),
     )
     tmp_path.replace(output_path)
     return output_path
