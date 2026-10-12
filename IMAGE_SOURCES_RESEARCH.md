@@ -6,6 +6,101 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-10-12 (quinta execução)
+
+**Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
+quinta execução consecutiva.**
+
+Testes reais desta execução:
+- `WebFetch` em `https://images-api.nasa.gov/search?q=nebula&media_type=image`
+  (fonte já em produção) → erro `getaddrinfo ENOTFOUND images-api.nasa.gov`
+  (resolução DNS falhou, variação do bloqueio já visto nas execuções
+  anteriores como `EGRESS_BLOCKED`).
+- `curl --cacert /root/.ccr/ca-bundle.crt` para `images-api.nasa.gov`,
+  `commons.wikimedia.org` e `api.si.edu` → os três com
+  `CONNECT tunnel failed, response 403`. O log do proxy
+  (`$HTTPS_PROXY/__agentproxy/status`, campo `recentRelayFailures`) registra
+  os três com `connect_rejected` / "gateway answered 403 to CONNECT (policy
+  denial or upstream failure)", mesmo padrão das quatro execuções anteriores
+  (02/10 x3, 05/10). `"selective": false` no status do proxy confirma de
+  novo que é bloqueio geral da organização, não uma allowlist incompleta.
+
+Como o teste real (critério 1) permanece impossível, usei `WebSearch` (que
+não passa pelo mesmo proxy) para revisar dois candidatos já pendentes:
+
+### Chandra X-ray Observatory (chandra.harvard.edu/photo) — investigado mais a fundo, rebaixado
+- Execuções anteriores concluíram que não havia evidência de API/endpoint
+  JSON (diferente da plataforma AVM compartilhada por ESA/Hubble/Webb/ESO/
+  NOIRLab). Pesquisa desta execução encontra, de fato, um feed público real:
+  `https://chandra.harvard.edu/photo/xml/` (RSS 2.0, também em
+  `chandra.cfa.harvard.edu/photo/xml/` e `chandra.si.edu/...`), sem chave.
+- Mas o feed só traz `title`, `link`, `guid`, `pubDate`, `description` por
+  item — **sem URL de imagem direta nem enclosure**. O `link` aponta pra
+  uma página HTML do item, não pro arquivo de imagem; pegar a imagem de
+  verdade exigiria fazer scraping de HTML por item (buscar `<img>`/padrão de
+  URL na página), não só consumir um feed estruturado — um padrão de
+  integração bem mais frágil e fora do que as outras fontes já no pipeline
+  oferecem (JSON direto com URL do arquivo).
+- Licença também mais ambígua que as fontes AVM (CC BY 4.0 limpo): a
+  política de imagens do Chandra/SAO (`chandra.si.edu/photo/image_use.html`)
+  é "sem reivindicação de copyright, seguir diretrizes da NASA", mas avisa
+  que parte do material combina dados de terceiros com direitos próprios, e
+  que uso comercial pode envolver direito de imagem de pessoas reconhecíveis
+  nas fotos — mais caso-a-caso que um CC BY/CC0 direto. (Uma página separada
+  do Center for Astrophysics menciona CC0 pra ativos digitais do CfA em
+  geral, mas não é claro se cobre especificamente o acervo do Photo Album do
+  Chandra, com esse aviso específico ao lado.)
+- **Rebaixado**: sem URL de imagem estruturada no feed e com licença menos
+  clara que os candidatos já pendentes (Wikimedia/Smithsonian/USGS), não
+  compensa priorizar sobre eles. Mantido como candidato de baixíssima
+  prioridade, não descartado por completo (o feed existe e é real, não é
+  invenção) mas improvável de valer o esforço de scraping que exigiria.
+
+### Smithsonian Open Access API — endpoint específico de categoria encontrado
+- Pesquisa desta execução (documentação de terceiros que espelha a doc
+  oficial, já que a doc oficial em `edan.si.edu/openaccess/docs/` não foi
+  acessível sem rede) encontra um endpoint de busca **por categoria**, mais
+  específico do que o `/search` genérico já registrado:
+  `https://api.si.edu/openaccess/api/v1.0/category/:cat/search`, com
+  `:cat` podendo ser `science_technology` (a categoria mais provável de
+  conter o acervo de astronomia do Center for Astrophysics | Harvard &
+  Smithsonian, já mencionado nas execuções anteriores). Parâmetros: `q`
+  (aceita operadores booleanos `AND`/`OR` e busca por campo, ex.
+  `topic:Gastropoda`), `rows` (default 10, 0–1000).
+- Não muda a conclusão já registrada (licença CC0, chave gratuita via
+  api.data.gov, `DEMO_KEY` funciona sem cadastro pra teste rápido) — só
+  refina qual endpoint testar primeiro na próxima execução com rede
+  liberada: tentar `category/science_technology/search?q=nebula` antes do
+  `/search?q=nebula` genérico, pra ver se a categoria já filtra ruído de
+  outras coleções do Smithsonian (arte, história) que não interessam ao
+  canal.
+- Também não foi possível confirmar nesta execução (mesma limitação de
+  rede) se esse endpoint retorna URL de imagem direta por item e em volume
+  suficiente — segue pendente de teste real.
+
+Candidatos pendentes sem mudança nesta execução: Wikimedia Commons API,
+USGS ScienceBase (`sciencebase.gov/catalog/items?q=...&format=json`), NOAA
+SWPC (mapa de previsão de aurora, baixa prioridade, não é foto real).
+Candidatos já descartados em execuções anteriores (JAXA, Flickr, Unsplash,
+Pexels) seguem descartados, sem novidade que mude a conclusão.
+
+Ação recomendada: igual às quatro execuções anteriores, agora mais urgente
+(5 execuções seguidas, ~1 semana, sem conseguir validar nada de verdade por
+bloqueio de rede de política da organização). Liberar "Network access" do
+ambiente cloud desta rotina (modo Custom com allowlist dos domínios já em
+produção + `commons.wikimedia.org`, `api.si.edu`, `www.sciencebase.gov`,
+ou um nível de acesso mais amplo) é o único jeito de esta rotina conseguir
+cumprir o critério de teste real pedido pela tarefa. Reportado ao usuário
+por notificação nesta execução.
+
+**Nenhuma fonte nova encontrada em 2026-10-12** — bloqueio de rede
+confirmado pela quinta vez consecutiva; avanço desta execução foi só
+bibliográfico (feed real do Chandra encontrado e rebaixado por falta de URL
+de imagem estruturada e licença mais ambígua; endpoint de categoria do
+Smithsonian Open Access refinado).
+
+---
+
 ## 2026-10-05 (quarta execução)
 
 **Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
