@@ -25,7 +25,12 @@ DEFAULT_TOPICS = [
     ("sistema solar", "solar system"),
     ("galáxias e colisões cósmicas", "galaxy collision"),
     ("matéria escura e energia escura", "dark matter"),
-    ("missões espaciais históricas", "space mission"),
+    # "space mission" sanitizava pra só "space" (genérico demais) e, mesmo
+    # sem sanitizar, o 1º resultado real era treino de maquete da ISS - sem
+    # relação com "missões espaciais HISTÓRICAS". Trocado por termo mais
+    # concreto e verificado contra a API real (13/10/2026): 100 resultados,
+    # 1º já em tema (Apollo 15).
+    ("missões espaciais históricas", "Apollo moon landing"),
     ("aglomerados de estrelas", "star cluster"),
     ("a origem do universo", "big bang"),
 ]

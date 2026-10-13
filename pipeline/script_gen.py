@@ -1202,16 +1202,78 @@ def _choose_news_topic(channel: sqlite3.Row) -> tuple[str, str, str, list] | Non
     return None
 
 
+# Score "bom o bastante pra considerar o tema viável" - mais baixo que
+# MIN_REAL_IMAGES (3, usado pra validar o conjunto final de imagens do
+# vídeo depois de toda a extração de palavras-chave do roteiro) porque essa
+# checagem é feita ANTES de qualquer roteiro existir, só com o image_query
+# cadastrado do tema - um pré-filtro rápido e barato, não a validação final.
+_TOPIC_PRECHECK_MIN_IMAGES = 2
+
+
+def _topic_has_images(image_query: str, min_count: int = _TOPIC_PRECHECK_MIN_IMAGES) -> bool:
+    """Checagem RÁPIDA e BARATA (só busca de imagem - segundos, sem LLM) se
+    um tema provavelmente tem imagem real o bastante, usada ANTES de pagar
+    o custo de escrever o roteiro inteiro (múltiplas chamadas ao Ollama -
+    roteiro, fact-check, clareza, gancho - minutos, não segundos). Falha
+    real relatada pelo dono (13/10/2026): o pipeline escolhia o tema
+    totalmente às cegas quanto a imagem, escrevia o roteiro completo, SÓ
+    ENTÃO descobria que não tinha imagem o bastante, e tentava de novo do
+    zero com OUTRO tema igualmente às cegas - o padrão exato que causou a
+    pilha de gerações simultâneas e a colisão de arquivo temporário
+    (WinError 32) relatada na mesma madrugada. Resultado não é garantia
+    (o roteiro final usa palavras-chave mais específicas, extraídas pelo
+    LLM dos fatos-fonte, que podem achar ainda mais imagem) - é só um
+    pré-filtro pra não começar a escrever um roteiro fadado a ser
+    descartado."""
+    try:
+        found = _search_relevant_images([image_query], image_query, target_count=min_count)
+        return len(found) >= min_count
+    except Exception:
+        # Falha na checagem (rede fora, etc.) não deve travar a escolha de
+        # tema - segue como se tivesse passado, deixando o MIN_REAL_IMAGES
+        # no final do roteiro como rede de segurança de qualquer jeito.
+        return True
+
+
+def _pick_topic_with_images(candidates: list[tuple[str, str]]) -> tuple[str, str] | None:
+    """Escolhe o primeiro tema (ordem embaralhada) de `candidates` que passa
+    em _topic_has_images - None se NENHUM candidato tiver imagem o
+    bastante (chamador decide o que fazer nesse caso, ex.: desistir do dia
+    em vez de insistir cegamente)."""
+    shuffled = list(candidates)
+    random.shuffle(shuffled)
+    for label, query in shuffled:
+        if _topic_has_images(query):
+            return label, query
+    return None
+
+
 def _choose_fallback_topic(channel: sqlite3.Row) -> tuple[str, str]:
     """Escolhe um tema da lista rotativa do canal evitando repetir os últimos
     usados - sem isso, rodando 1x/dia por meses, a lista de 10 temas padrão
     se esgota (repetição perceptível) em ~1-2 semanas. Se todos os temas
     estiverem "recentes" (lista curta ou canal muito ativo), cai de volta pra
-    sorteio livre em vez de travar."""
+    sorteio livre em vez de travar.
+
+    Pré-valida imagem (ver _topic_has_images) ANTES de devolver o tema -
+    sem isso, o pipeline só descobria a falta de imagem depois de já ter
+    escrito o roteiro inteiro (ver _pick_topic_with_images)."""
     topics = channels.topics_for(channel)
     recent = catalog.recent_topics(channel["id"], lookback=max(len(topics) - 2, 3))
     available = [t for t in topics if t[0] not in recent]
-    return random.choice(available or topics)
+    candidates = available or topics
+    picked = _pick_topic_with_images(candidates)
+    if picked:
+        return picked
+    # Nenhum tema da rotação tem imagem o bastante agora (raro - rede fora,
+    # ou API das 5 fontes temporariamente sem resultado) - devolve um tema
+    # qualquer mesmo assim; o MIN_REAL_IMAGES no fim de build_daily_script
+    # continua como rede de segurança final.
+    notify.log(
+        f"[{channel['name']}] Nenhum tema da rotação teve imagem o bastante no pré-check - "
+        "seguindo mesmo assim, a checagem final decide."
+    )
+    return random.choice(candidates)
 
 
 # Framework de fontes de conteúdo plugável - cada fonte é uma função
@@ -1531,7 +1593,12 @@ def build_daily_script(channel: sqlite3.Row, forced_topic: tuple[str, str] | Non
                 f"'{channel['name']}' (tentados: {sorted(exclude)}) - pulando a geração hoje em vez de "
                 "publicar vídeo com imagem genérica/sem relação."
             )
-        retry_topic = random.choice(candidates)
+        # Pré-valida o PRÓXIMO tema antes de pagar o custo de escrever outro
+        # roteiro inteiro de novo - sem isso, uma 2ª (ou 3ª) tentativa podia
+        # cair em OUTRO tema igualmente sem imagem, às cegas, empilhando
+        # gerações completas desperdiçadas (causa real da pilha de builds
+        # simultâneos que colidiu em WinError 32, 13/10/2026).
+        retry_topic = _pick_topic_with_images(candidates) or random.choice(candidates)
         notify.log(
             f"[{channel['name']}] \"{topic}\" não teve imagens específicas suficientes "
             f"({len(assets)}/{MIN_REAL_IMAGES}) - trocando pro tema \"{retry_topic[0]}\" em vez de usar "
