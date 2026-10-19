@@ -6,6 +6,154 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-10-19 (sexta execução)
+
+**Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
+sexta execução consecutiva.**
+
+Testes reais desta execução:
+- `WebFetch` em `https://images-api.nasa.gov/search?q=nebula&media_type=image`
+  (fonte já em produção) → `getaddrinfo ENOTFOUND images-api.nasa.gov`.
+- `curl --cacert /root/.ccr/ca-bundle.crt` para `images-api.nasa.gov` →
+  `CONNECT tunnel failed, response 403`. `$HTTPS_PROXY/__agentproxy/status`
+  confirma `"selective": false` e registra a falha em
+  `recentRelayFailures` como `connect_rejected` / "gateway answered 403 to
+  CONNECT (policy denial or upstream failure)" — mesmo padrão geral das
+  cinco execuções anteriores, não específico de um domínio.
+- `WebFetch` em `https://api.openverse.org/v1/images/?q=nebula&license=cc0,by,by-sa&page_size=5`
+  (candidato novo desta execução, ver abaixo) → mesmo erro
+  (`getaddrinfo ENOTFOUND api.openverse.org`), confirmando que o bloqueio
+  também vale para domínios nunca testados antes nesta rotina, não só os
+  já conhecidos.
+
+Como o teste real (critério 1) permanece impossível, usei `WebSearch` para
+levantar candidatos **genuinamente novos** (além de revisar o estado dos
+pendentes), já que repetir só os mesmos quatro pendentes sem conseguir
+testá-los não agregaria informação:
+
+### Openverse API — candidato novo, promissor, pendente de teste real
+- URL base: `https://api.openverse.org/v1/`. Endpoint principal:
+  `GET /images/?q=<query>&license=cc0,by,by-sa&page_size=<n>` (também existe
+  `/images/{identifier}/` para detalhe de um item e, segundo fontes
+  terceiras, `/rate_limit/` para checar cota restante).
+- Sem chave para uso anônimo básico (fontes terceiras, não a doc oficial —
+  não consegui abrir `api.openverse.org` por causa do bloqueio de rede —
+  divergem sobre o limite exato: uma cita 100 req/dia + 5/hora por IP,
+  outra cita só "limite menor que usuário autenticado"; um post oficial do
+  blog do projeto, de 2022, menciona cap de 20 resultados por página sem
+  chave após um pico de tráfego). Chave gratuita opcional existe via
+  cadastro simples, levantando o limite — mesmo padrão aceitável já usado
+  pela NASA APOD.
+- Relevância: não é um acervo próprio de astronomia, é um **agregador** de
+  conteúdo com licença aberta que já indexa Wikimedia Commons e Flickr
+  Commons (incluindo a conta oficial "NASA on The Commons", já descartada
+  nesta pesquisa como fonte direta por exigir conta paga da Flickr — o
+  Openverse contornaria isso, pois ele mesmo faz a raspagem e reindexação,
+  o consumidor da API não precisa de chave da Flickr) além de museus/
+  bibliotecas com material científico. Também herda o problema já
+  registrado para o Wikimedia Commons: licença varia por item, então
+  qualquer integração precisa filtrar pelo campo de licença por resultado
+  (o parâmetro `license=cc0,by,by-sa` já faz isso na query, mas vale
+  reconfirmar o campo de licença de cada item na resposta antes de baixar,
+  e não só confiar no filtro de busca).
+- Integração esperada (ainda não testada de verdade): uma
+  `fetch_openverse_images_for_topic(query, count)` que faz o GET acima,
+  itera `results[]`, pega `url`/`thumbnail` e monta
+  `VisualAsset(local_path=..., credit=item["attribution"] ou item["creator"],
+  title=item["title"])`.
+- **Pendente**: confirmar endpoint, formato de resposta, licença exata por
+  item e limite de taxa anônimo reais (nada disso foi confirmado contra a
+  doc oficial, só contra espelhos/wrappers de terceiros, pela mesma razão
+  de bloqueio de rede). Candidato forte para a próxima execução com rede
+  liberada, por resolver de uma vez o problema de licença variável que já
+  trava o candidato Wikimedia Commons sozinho.
+
+### NASA PDS Imaging Atlas API (`pds-imaging.jpl.nasa.gov/tools/atlas/api`) — investigado, rebaixado por complexidade
+- Pesquisa desta execução confirma uma API real e documentada
+  (`pds-imaging.jpl.nasa.gov/tools/atlas/documentation/docs/api/search`),
+  parte do PDS Search Protocol sobre Apache Solr/Lucene, com JSON como
+  saída padrão. Aceita parâmetros como `identifier`, `product_id`,
+  `instrument`, `instrument_host`, `spacecraft`, `investigation`,
+  `mission` — cobre bem o nicho (imagens reais de instrumentos de
+  espaçonaves planetárias: Cassini, Mars rovers, etc., já há um "Cassini
+  Users Guide ImageAtlas" oficial).
+- Mas a chamada de exemplo encontrada na documentação é um `POST` ao
+  endpoint `_search` com uma query estilo Lucene (`bool`/`match` sobre
+  `lidvid`), devolvendo o rótulo PDS4 completo do produto
+  (`_source`) — não uma URL de imagem direta por busca simples de
+  palavra-chave como `images-api.nasa.gov`. Extrair a URL do arquivo de
+  imagem de fato exigiria navegar os campos do rótulo PDS4 (formato de
+  metadados científico, não pensado para consumo simples tipo "pegue a
+  imagem"), um padrão de integração bem mais pesado que as fontes já no
+  pipeline.
+- Licença: não encontrei (nem na pesquisa desta execução, nem antes)
+  uma página de termos específica deste serviço — por analogia seria
+  domínio público (produto do governo dos EUA, mesma linha do
+  `images-api.nasa.gov`), mas isso não foi confirmado para este serviço
+  especificamente.
+- **Rebaixado a baixíssima prioridade**: mantém-se pendente mas atrás de
+  Openverse, Wikimedia Commons e Smithsonian Open Access na fila — a
+  complexidade de parsing de rótulo PDS4 só valeria o esforço se as fontes
+  mais simples já pendentes continuarem bloqueadas por bloqueio de rede
+  por muitas execuções mais.
+
+### Vera Rubin Observatory — investigado, descartado por falta de API estruturada
+- Rubin Observatory (NSF/DOE, "first light" em 2025, relevante para o
+  nicho) tem uma galeria pública de imagens
+  (`rubinobservatory.org/gallery/collections/main-gallery`) com crédito,
+  data, tamanhos de download por item — mas são páginas HTML tradicionais,
+  sem endpoint JSON encontrado.
+- As APIs reais do Rubin Science Platform (`data.lsst.cloud` — HiPS,
+  Simple Image Access, TAP, cutouts) são para **dados científicos brutos**
+  (não fotos processadas para divulgação) e exigem token de acesso
+  (ligado a conta aprovada), não é acesso público simples.
+- **Descartado** nesta rodada pelo mesmo motivo já usado para Chandra e
+  JAXA: sem endpoint estruturado público e sem chave simples para o
+  conteúdo de divulgação (a galeria), só para dados científicos com token.
+  Poderia ser reavaliado se a galeria de divulgação um dia expuser um
+  endpoint JSON (como ESA/Hubble/Webb/ESO/NOIRLab fazem).
+
+### JPL Photojournal — não é fonte nova, é refinamento de fonte já em produção
+- Não encontrei endpoint JSON próprio do Photojournal
+  (`photojournal.jpl.nasa.gov`). Mas a pesquisa confirma que a própria
+  `images-api.nasa.gov` (já em produção) aceita um parâmetro `center`
+  (código de 3 letras, maiúsculo, ex. `JPL`, `JSC`, `KSC`, `GSFC`) que
+  filtra resultados por centro da NASA responsável — útil para quem for
+  ajustar `search_nasa_images()` para priorizar imagens do JPL
+  (missões planetárias) quando o tópico do roteiro for sobre Marte/sondas/
+  etc. Não é uma fonte nova, é uma nota de ajuste fino de uma fonte
+  existente; registrado aqui para não se perder.
+
+Candidatos pendentes sem mudança nesta execução (continuam bloqueados por
+falta de rede para teste real): Wikimedia Commons API, Smithsonian Open
+Access API (`category/science_technology/search`), USGS ScienceBase.
+Chandra segue rebaixado (feed sem URL de imagem estruturada) e NOAA/aurora
+como baixa prioridade (mapa de previsão, não foto real). Candidatos já
+descartados em execuções anteriores (JAXA, Flickr direto, Unsplash,
+Pexels) seguem descartados.
+
+Ação recomendada: igual às cinco execuções anteriores, agora com mais
+urgência ainda (6 execuções seguidas, ~2.5 semanas, sem conseguir validar
+nada de verdade por bloqueio de rede de política da organização, incluindo
+agora um domínio nunca antes testado — `api.openverse.org` — confirmando
+que não é uma allowlist incompleta e sim bloqueio geral). Liberar "Network
+access" do ambiente cloud desta rotina (allowlist incluindo os domínios já
+em produção + `commons.wikimedia.org`, `api.si.edu`, `www.sciencebase.gov`,
+`api.openverse.org`, ou um nível de acesso mais amplo) é o único jeito de
+esta rotina conseguir cumprir o critério de teste real pedido pela tarefa.
+
+**Nenhuma fonte nova encontrada em 2026-10-19** (nenhuma validada por teste
+real — bloqueio de rede confirmado pela sexta vez consecutiva, agora
+também contra um domínio novo); avanço desta execução foi só
+bibliográfico: Openverse API identificado como candidato novo e promissor
+(agregador de licença aberta, resolveria o problema de licença variável do
+Wikimedia Commons), PDS Imaging Atlas da NASA/JPL investigado e rebaixado
+por complexidade de parsing, Rubin Observatory investigado e descartado
+por falta de endpoint estruturado, e uma nota de refinamento (parâmetro
+`center=JPL`) registrada para a fonte NASA Images API já em produção.
+
+---
+
 ## 2026-10-12 (quinta execução)
 
 **Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
