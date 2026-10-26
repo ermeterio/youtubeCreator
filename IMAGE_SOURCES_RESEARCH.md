@@ -6,6 +6,121 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-10-26 (sétima execução)
+
+**Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
+sétima execução consecutiva.**
+
+Testes reais desta execução:
+- `WebFetch` em `https://images-api.nasa.gov/search?q=nebula&media_type=image`
+  (fonte já em produção) → `getaddrinfo ENOTFOUND images-api.nasa.gov`.
+- `curl --cacert /root/.ccr/ca-bundle.crt` (via Bash, mesmo proxy de egress)
+  para `images-api.nasa.gov`, `commons.wikimedia.org`, `api.si.edu`,
+  `www.sciencebase.gov` e `api.openverse.org` → todos com
+  `CONNECT tunnel failed, response 403`. `$HTTPS_PROXY/__agentproxy/status`
+  confirma `"selective": false` e registra os cinco domínios em
+  `recentRelayFailures` como `connect_rejected` / "gateway answered 403 to
+  CONNECT (policy denial or upstream failure)" — mesmo padrão geral das seis
+  execuções anteriores. Diferença notada: o status consultado ANTES dos
+  testes desta execução veio com `recentRelayFailures: []` (vazio, log
+  provavelmente limpo entre execuções/containers), mas voltou a popular
+  imediatamente com os mesmos erros assim que as chamadas reais foram
+  tentadas — ou seja, não é sinal de que o bloqueio tenha sido removido,
+  só que o log de falhas recentes não persiste entre sessões.
+
+Como o teste real (critério 1) permanece impossível, usei `WebSearch` para
+investigar candidatos adicionais além dos já pendentes, sem conseguir
+validar nenhum de verdade:
+
+### DLR (German Aerospace Center) — investigado, descartado
+- Não existe API de galeria de imagens documentada. Os termos do portal
+  (`dlr.de`) afirmam copyright do DLR sobre o conteúdo público por padrão,
+  exigindo permissão prévia do titular pra uso. A única exceção encontrada
+  (página do Institute of Future Fuels) usa CC BY-NC-ND 3.0 — license que
+  proíbe uso comercial E derivados, não atende ao critério 3 de forma
+  alguma. **Descartado**: sem API testável e sem licença compatível.
+
+### Europeana API — investigado, baixa prioridade (não descartado, mas atrás da fila)
+- API real e documentada (`api.europeana.eu/api/v2/search.json`), precisa
+  de chave gratuita via cadastro simples (atende ao critério 2). Suporta
+  filtro `reusability=open` (Domínio Público/CC0/CC BY/CC BY-SA) combinado
+  com `qf=TYPE:IMAGE` — resolveria o problema de licença variável igual ao
+  Openverse.
+- Relevância ao nicho é a maior dúvida: é um agregador de patrimônio
+  cultural europeu (museus, bibliotecas, arquivos) — não encontrei
+  confirmação de que indexe acervo relevante de astronomia/ciência espacial
+  em volume, só a garantia genérica de filtro por tipo/licença. Diferente
+  do Openverse (que indexa Wikimedia Commons e Flickr Commons, fontes já
+  conhecidas por ter bom acervo de astronomia), o conteúdo típico da
+  Europeana é mais voltado a arte/história.
+- **Mantido como candidato de baixa prioridade**, atrás de Openverse,
+  Wikimedia Commons e Smithsonian Open Access — só vale testar de verdade
+  se essas fontes mais prováveis continuarem bloqueadas por muitas
+  execuções mais, e mesmo assim precisaria confirmar volume relevante de
+  resultados pra `query=astronomy`/`query=nebula` antes de integrar.
+
+### NASA SVS (Scientific Visualization Studio) — investigado, sem evidência de API própria
+- Pesquisa não encontrou endpoint de busca JSON dedicado ao SVS
+  (`svs.gsfc.nasa.gov`) — só a galeria HTML tradicional e uma entrada no
+  catálogo data.gov sem API associada. Não há confirmação de que o
+  conteúdo do SVS seja indexado pela `images-api.nasa.gov` (já em produção)
+  separadamente do acervo geral. **Não é uma fonte nova**: fica registrado
+  aqui só pra não precisar reinvestigar nas próximas execuções; se o SVS
+  for coberto pela NASA Images API já em produção, não há ganho adicional
+  em integrá-lo separadamente.
+
+### Library of Congress API — investigado, descartado por falta de filtro de licença e de foco no nicho
+- Existe API JSON real (`loc.gov/pictures/api?fo=json`, parte de
+  `loc.gov/apis/json-and-yaml`), sem chave. Mas a pesquisa não encontrou um
+  parâmetro de filtro por status de direitos (equivalente ao
+  `reusability=open` da Europeana ou ao filtro de licença do Openverse) —
+  cada item precisaria ter os direitos verificados manualmente, e o acervo
+  é de fotografia histórica americana em geral, não astronomia/ciência
+  espacial. **Descartado**: falta tanto filtro de licença automatizável
+  quanto relevância ao nicho do canal.
+
+### Openverse — refinamento (ainda pendente de teste real)
+- Pesquisa desta execução encontra números de limite de taxa anônimo
+  diferentes dos citados na execução anterior (100/dia + 5/hora, vs. uma
+  fonte terceira agora citando os mesmos números mas também uma paginação
+  anônima capada em ~240 resultados/12 páginas de 20) — ainda não confirmado
+  contra a doc oficial (`api.openverse.org/v1/#tag/auth`), que não foi
+  possível abrir por causa do bloqueio de rede. Os Termos de Serviço do
+  Openverse proíbem "scraping" — não deve afetar o uso normal da API
+  pública como já planejado (consumir o endpoint de busca documentado, não
+  baixar o site via scraping), mas vale ter em mente ao implementar.
+- Continua candidato mais promissor da fila (resolve o problema de licença
+  variável e já indexa Wikimedia/Flickr Commons), sem mudança de prioridade.
+
+Candidatos pendentes sem mudança nesta execução (continuam bloqueados por
+falta de rede para teste real): Wikimedia Commons API, Smithsonian Open
+Access API, USGS ScienceBase, PDS Imaging Atlas (baixa prioridade por
+complexidade de parsing PDS4), Rubin Observatory (descartado por falta de
+endpoint estruturado), Chandra (rebaixado, feed sem URL de imagem
+estruturada), NOAA/aurora (baixa prioridade, mapa de previsão não é foto
+real). Candidatos já descartados em execuções anteriores (JAXA, Flickr
+direto, Unsplash, Pexels) seguem descartados.
+
+Ação recomendada: igual às seis execuções anteriores, agora com mais
+urgência ainda (7 execuções seguidas, quase 3 semanas, sem conseguir
+validar nada de verdade por bloqueio de rede de política da organização).
+Liberar "Network access" do ambiente cloud desta rotina (allowlist incluindo
+os domínios já em produção + `commons.wikimedia.org`, `api.si.edu`,
+`www.sciencebase.gov`, `api.openverse.org`, ou um nível de acesso mais
+amplo) continua sendo o único jeito de esta rotina conseguir cumprir o
+critério de teste real pedido pela tarefa.
+
+**Nenhuma fonte nova encontrada em 2026-10-26** (nenhuma validada por teste
+real — bloqueio de rede confirmado pela sétima vez consecutiva); avanço
+desta execução foi só bibliográfico: DLR investigado e descartado (sem API,
+licença CC BY-NC-ND não comercial), Europeana investigado como candidato de
+baixa prioridade (API real com filtro de licença, mas relevância ao nicho
+incerta), NASA SVS e Library of Congress investigados e descartados/sem
+ganho adicional, e refinamento dos números de rate limit do Openverse
+(ainda não confirmados contra a doc oficial).
+
+---
+
 ## 2026-10-19 (sexta execução)
 
 **Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
