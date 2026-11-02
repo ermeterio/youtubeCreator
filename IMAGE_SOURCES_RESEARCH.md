@@ -6,6 +6,116 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-11-02 (oitava execução)
+
+**Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
+oitava execução consecutiva.**
+
+Testes reais desta execução:
+- `WebFetch` em `https://images-api.nasa.gov/search?q=nebula&media_type=image`
+  (fonte já em produção) → `getaddrinfo ENOTFOUND images-api.nasa.gov`.
+- `curl --cacert /root/.ccr/ca-bundle.crt` (via Bash, mesmo proxy de egress)
+  para `https://commons.wikimedia.org/w/api.php?...` (candidato pendente) →
+  `CONNECT tunnel failed, response 403`.
+- `$HTTPS_PROXY/__agentproxy/status` consultado antes e depois dos testes:
+  antes, `recentRelayFailures: []` (log limpo, mesmo padrão de não persistir
+  entre sessões já notado na 7ª execução); depois do teste real, populado
+  com `commons.wikimedia.org:443` → `connect_rejected` / "gateway answered
+  403 to CONNECT (policy denial or upstream failure)". `"selective": false`
+  confirma de novo que é bloqueio geral da organização, não allowlist
+  incompleta — mesmo padrão das oito execuções, agora com mais de um mês.
+
+Como o teste real (critério 1) permanece impossível, usei `WebSearch` para
+refinar candidatos pendentes e investigar uma pista nova (ESA JUICE/Solar
+Orbiter), sem conseguir validar nada de verdade:
+
+### Openverse — refinamento de rate limit, ainda contraditório, pendente de teste real
+- Pesquisa desta execução não encontrou a doc oficial atualizada (resultados
+  deram só posts antigos e espelhos de terceiros). A única fonte oficial
+  encontrada (post do blog do projeto, 2022) diz que requisição anônima com
+  `page_size` acima do padrão (20) passou a devolver 401, após abuso com
+  `page_size=500`; o mesmo post cita throttle de 1 req/s pra usuário anônimo.
+  Um pacote npm de terceiros (servidor MCP não-oficial) contradiz isso,
+  listando `page_size` máximo de 500 e limites de 100/dia + 5/hora — os
+  mesmos números já citados em execuções anteriores, mas sem confirmação
+  oficial. **Sem mudança de prioridade**: continua candidato mais promissor
+  da fila, mas os números de limite seguem não confirmados contra a doc
+  oficial (`api.openverse.org/v1/#tag/auth`), só testável com rede liberada.
+
+### Smithsonian Open Access — DEMO_KEY e tier de chave registrada refinados
+- Pesquisa desta execução (espelhos de terceiros da doc oficial, que
+  continua inacessível sem rede) confirma: `DEMO_KEY` é explicitamente
+  descrito como "sem cadastro, só para teste/avaliação inicial", com limite
+  por IP (número exato não confirmado); chave registrada via api.data.gov
+  tem tier padrão de 1000 requisições/hora, resetando de forma contínua
+  (rolling); excesso retorna HTTP 429. Também existe um bucket S3 de dados
+  em massa que não conta contra os limites de API (não relevante pro padrão
+  de busca por tópico do pipeline, mas registrado). **Sem mudança de
+  prioridade ou conclusão**: licença CC0 e chave gratuita já confirmadas em
+  execuções anteriores, só os números de rate limit foram refinados — ainda
+  pendente de teste real do endpoint de busca.
+
+### ESA JUICE / Solar Orbiter (portal esa.int, fora da plataforma AVM) — investigado, descartado
+- Pista nova desta execução: as galerias de imagens das missões JUICE e
+  Solar Orbiter em `esa.int`/`sci.esa.int` são páginas HTML tradicionais
+  (listagem com paginação por `offset`), sem endpoint JSON encontrado —
+  diferente da plataforma AVM compartilhada por ESA/Hubble, ESA/Webb, ESO e
+  NOIRLab (já em produção/validada), que é operada por um sistema de
+  divulgação científica distinto do portal institucional geral da ESA.
+- Licença também diferente: material dessas galerias aparece como CC BY-SA
+  3.0 IGO (ou "ESA Standard Licence" como alternativa) — CC BY-SA exige
+  compartilhamento pela mesma licença (share-alike), não é um problema para
+  uso comercial com atribuição em si (atende ao critério 3), mas é uma
+  licença diferente da CC BY 4.0 "limpa" já usada para os créditos das
+  fontes AVM, então exigiria lógica de crédito/aviso de licença separada se
+  fosse integrado.
+- **Descartado**: sem API JSON própria (mesmo padrão de portal HTML já
+  descartado para Chandra/Rubin), a plataforma AVM já cobre o conteúdo mais
+  relevante da ESA em produção. Não vale o esforço de scraping de HTML para
+  cobrir só mais duas missões específicas.
+
+### NASA SVS (Scientific Visualization Studio) — reconfirmado sem endpoint de busca
+- Pesquisa desta execução encontra evidência de que `svs.gsfc.nasa.gov/api/<id>`
+  existe de fato (ex. `/api/40400`, `/api/13533`, aparecendo indexado em
+  resultados de busca) — mas é uma API de **detalhe por ID** (GET de um
+  item já conhecido), não uma busca por palavra-chave equivalente ao
+  `images-api.nasa.gov/search?q=...`. Nenhuma pesquisa desta execução (duas
+  tentativas, incluindo busca direta por "svs api search endpoint") encontra
+  um endpoint de busca textual documentado para o SVS.
+- **Não é uma fonte nova, reconfirma a conclusão da 7ª execução**: sem busca
+  por palavra-chave, não dá pra integrar no padrão `fetch_*_images_for_topic`
+  (que recebe um tópico/tema do roteiro, não um ID de item já conhecido).
+  Registrado só para não reinvestigar do zero: se o SVS um dia expuser um
+  endpoint de busca, revisar.
+
+Candidatos pendentes sem mudança nesta execução (continuam bloqueados por
+falta de rede para teste real): Wikimedia Commons API, Smithsonian Open
+Access API, USGS ScienceBase, PDS Imaging Atlas (baixa prioridade), Chandra
+(rebaixado), NOAA/aurora (baixa prioridade), Europeana (baixa prioridade,
+relevância ao nicho incerta). Candidatos já descartados em execuções
+anteriores (JAXA, Flickr direto, Unsplash, Pexels, DLR, Library of Congress,
+Rubin Observatory, agora também ESA JUICE/Solar Orbiter) seguem descartados.
+
+Ação recomendada: igual às sete execuções anteriores, agora com mais de um
+mês de bloqueio ininterrupto (8 execuções seguidas sem conseguir validar
+nada de verdade por bloqueio de rede de política da organização). Liberar
+"Network access" do ambiente cloud desta rotina (allowlist incluindo os
+domínios já em produção + `commons.wikimedia.org`, `api.si.edu`,
+`www.sciencebase.gov`, `api.openverse.org`, ou um nível de acesso mais
+amplo) continua sendo o único jeito de esta rotina conseguir cumprir o
+critério de teste real pedido pela tarefa.
+
+**Nenhuma fonte nova encontrada em 2026-11-02** (nenhuma validada por teste
+real — bloqueio de rede confirmado pela oitava vez consecutiva, mais de um
+mês seguido); avanço desta execução foi só bibliográfico: rate limits do
+Openverse e do Smithsonian Open Access refinados (ainda sem confirmação
+oficial no caso do Openverse), ESA JUICE/Solar Orbiter investigado e
+descartado (sem API JSON, licença CC BY-SA 3.0 IGO diferente da AVM), e
+NASA SVS reconfirmado sem endpoint de busca por palavra-chave (só API de
+detalhe por ID).
+
+---
+
 ## 2026-10-26 (sétima execução)
 
 **Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
