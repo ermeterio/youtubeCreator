@@ -6,6 +6,157 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-11-09 (nona execução)
+
+**Resultado: nenhuma fonte nova validada por teste real (critério 1 segue
+impossível) — bloqueio de rede confirmado pela nona execução consecutiva.
+Mas esta execução encontra o mecanismo exato do bloqueio (não só "política
+geral da organização") e tenta corrigi-lo diretamente.**
+
+### Causa-raiz do bloqueio identificada com precisão nesta execução
+Execuções anteriores só tinham o sintoma (403 no CONNECT, DNS não resolve,
+`"selective": false` no status do proxy). Nesta execução, `get_environment`
+(ferramenta do host, não parte do pipeline) foi consultada e mostra a causa
+exata: o ambiente cloud desta rotina ("Default", pessoal, é o ambiente padrão
+de todas as sessões) está com `network.type = "limited"` e
+**`allowed_hosts: []` — lista vazia**. Só `allow_package_managers` e
+`allow_mcp_servers` estão ligados. Ou seja, nenhum host de API arbitrário
+está liberado, **incluindo os domínios já em produção**
+(`images-api.nasa.gov`, `api.nasa.gov`, `esahubble.org`, `esawebb.org`,
+`www.eso.org`, `noirlab.edu`, `api.spaceflightnewsapi.net` — confirmados no
+código-fonte de `pipeline/visual_source.py`). Testes reais desta execução:
+- `curl --cacert /root/.ccr/ca-bundle.crt` para `images-api.nasa.gov`,
+  `commons.wikimedia.org`, `api.openverse.org`, `api.si.edu` → todos
+  `CONNECT tunnel failed, response 403`.
+- `WebFetch` em `https://images-api.nasa.gov/search?q=nebula&media_type=image`
+  → `getaddrinfo ENOTFOUND images-api.nasa.gov`, com a mensagem do harness
+  confirmando que o host "falha a resolver assim quando está fora dos
+  domínios permitidos da sessão" — ou seja, a própria ferramenta confirma
+  que é allowlist, não falha de rede genérica.
+
+### Tentativa de correção nesta execução (bloqueada por falta de aprovação humana síncrona)
+Como o ambiente é editável por este usuário e não está salvo pra nenhum
+repositório específico (`saved_for_session_repositories: []`), a ação
+correta (por instrução do próprio host) é propor um ambiente pessoal novo
+dedicado a este repositório, não editar o "Default" (que afeta todas as
+sessões do usuário). Chamei `create_environment` propondo um ambiente
+"youtubeCreator" com os 7 domínios já em produção + os principais candidatos
+pendentes (`commons.wikimedia.org`, `upload.wikimedia.org`, `api.si.edu`,
+`api.openverse.org`, `www.sciencebase.gov`, `cxc.harvard.edu`,
+`svs.gsfc.nasa.gov`) e pedindo para esta sessão trocar de rede
+imediatamente. **Resultado: recusado** — a chamada exige aprovação humana
+síncrona ("a person's approval"), e esta é uma execução agendada automática,
+sem ninguém presente para aprovar. A ferramenta instruiu explicitamente a
+não tentar de novo e a registrar o bloqueio em vez de contornar.
+
+**Ação necessária do usuário (a mais concreta já registrada nas nove
+execuções)**: abrir esta rotina manualmente ("Run now" / executar agora) em
+uma sessão interativa e aprovar o prompt de criação/troca de ambiente — ou,
+de forma equivalente, ir em Settings do ambiente cloud e adicionar os hosts
+acima à allowlist do ambiente "Default" (ou de um ambiente pessoal dedicado
+a este repositório). Qualquer uma das duas resolve o bloqueio que já dura 9
+execuções (mais de 2 meses).
+
+### NASA Mars Rover Photos API + NASA EPIC API — candidato novo, forte, sem necessidade de domínio/chave novos
+Pesquisa via `WebSearch` (não dá pra confirmar com teste real pelo motivo
+acima) encontra dois recursos adicionais da própria família de APIs já em
+produção sob `api.nasa.gov` (mesma chave gratuita já obtida pro APOD,
+mesmo domínio já na allowlist de produção quando o bloqueio for resolvido):
+- **Mars Rover Photos**: `GET https://api.nasa.gov/mars-photos/api/v1/rovers/<rover>/photos?sol=<n>&api_key=<key>`
+  (ou `earth_date=YYYY-MM-DD` em vez de `sol`; também existe
+  `/latest_photos`). Resposta JSON com array `photos[]`, cada item com
+  `img_src` (URL direta da imagem), `earth_date`, `rover`, `camera`. Fotos
+  reais dos rovers (Curiosity, Perseverance, Opportunity, Spirit) —
+  altamente relevante pro nicho (exploração de Marte).
+- **EPIC (Earth Polychromatic Imaging Camera, satélite DSCOVR)**: via o
+  espelho já dentro do domínio de produção,
+  `GET https://api.nasa.gov/EPIC/api/natural/images?api_key=<key>` (lista
+  imagens disponíveis, cada item com campo `image`, ex.
+  `epic_1b_20151031074844`) e a URL do arquivo é montada como
+  `https://api.nasa.gov/EPIC/archive/natural/<yyyy>/<mm>/<dd>/png/<image>.png?api_key=<key>`.
+  Imagens reais do disco completo da Terra — relevante pro nicho em vídeos
+  sobre observação da Terra/clima espacial, menos central que Marte mas
+  ainda dentro do escopo "ciência espacial".
+- **Licença**: mesma política geral da NASA já aceita para `images-api.nasa.gov`
+  e para a APOD já em produção (conteúdo da NASA geralmente não tem
+  copyright nos EUA, ressalvas já conhecidas pelo pipeline — pessoas
+  identificáveis e conteúdo de terceiros marcado à parte). Não encontrei
+  texto de licença específico por coleção (Mars Photos/EPIC não têm página
+  de termos própria), mas é o mesmo domínio/guarda-chuva de uso já
+  aceito — não é uma licença nova a avaliar.
+- **Por que isto muda a prioridade da fila**: diferente de Openverse,
+  Wikimedia Commons, Smithsonian etc. (que precisam de domínio novo na
+  allowlist), Mars Rover Photos e EPIC usam o domínio e a chave que **já
+  estão em produção**. Assim que o bloqueio de rede acima for resolvido por
+  qualquer domínio (mesmo sem liberar os domínios novos pendentes), estas
+  duas já ficam testáveis e integráveis sem nenhuma mudança de ambiente
+  adicional. **Promovido ao topo da fila de candidatos**, acima do
+  Openverse.
+- **Integração esperada** (ainda não testada de verdade): duas funções novas
+  no padrão já usado, `fetch_nasa_mars_photos_for_topic(query, count)` e
+  `fetch_nasa_epic_images_for_topic(query, count)`, retornando
+  `VisualAsset(local_path=..., credit="NASA/JPL-Caltech" ou "NASA EPIC Team",
+  title=...)` — análogas à função já existente pra `images-api.nasa.gov`.
+- **DONKI (Database Of Notifications, Knowledge, Information)**, terceiro
+  recurso notável do mesmo domínio `api.nasa.gov`, **investigado e
+  descartado para este propósito**: é um banco de eventos de clima espacial
+  (CME, erupções solares, tempestades geomagnéticas) — a resposta JSON é
+  metadado do evento (velocidade, tipo, horário, instrumento), não uma URL
+  de imagem direta na maioria dos tipos de evento. Não encaixa no padrão
+  `fetch_*_images_for_topic` (que precisa devolver uma imagem, não um
+  registro textual).
+
+### USGS Astrogeology Science Center — refinamento, mesma objeção do PDS Imaging Atlas
+Pesquisa confirma uma API real e pública, `stac.astrogeology.usgs.gov/api`
+(protocolo STAC — SpatioTemporal Asset Catalog), com busca GET/POST e
+catálogo completo de dados planetários já carregado. Licença: uma página de
+mídia da USGS sobre essa API está marcada "Public Domain"; a galeria de
+imagens da Astrogeology diz que as imagens podem ser baixadas livremente
+(com ressalva de que imagens de terceiros, quando presentes, são marcadas e
+sujeitas a copyright). Não encontrei texto de licença específico cobrindo os
+registros da API STAC em si. **Mesma objeção já registrada pro PDS Imaging
+Atlas**: é dado científico bruto (rasters de análise, não fotos de
+divulgação prontas), exigiria navegar metadados STAC/PDS4 complexos pra
+extrair um arquivo de imagem útil — mantido como candidato de baixíssima
+prioridade, mesmo nível do PDS Imaging Atlas, não vale o esforço antes de
+esgotar os candidatos mais simples da fila.
+
+### Helioviewer API (SDO/SOHO, imagens solares) — candidato novo, pendente de confirmação de licença
+API real e documentada em `api.helioviewer.org/docs/v2/`, sem chave: `GET
+/v2/takeScreenshot/` gera uma imagem/captura customizada (retorna JSON com
+URL do arquivo quando `display` não é `true`) a partir de instrumentos como
+SDO/AIA e SOHO — relevante pro nicho (fenômenos solares, uma categoria
+frequente de vídeo do canal). **Mas a licença dos dados de imagem em si não
+foi confirmada**: só encontrei a licença do código-fonte do projeto
+(Mozilla Public License, em um espelho de terceiro do repositório, não a
+fonte oficial) e nenhuma página de termos de uso do conteúdo de imagem.
+Dados de instrumentos como SDO são geralmente domínio público (NASA/ESA),
+mas isso precisa ser confirmado na documentação oficial antes de integrar —
+**mantido como pendente, prioridade média**, atrás de Mars Rover
+Photos/EPIC (sem ambiguidade de licença) mas na frente de USGS
+Astrogeology/PDS (sem o problema de dado bruto não-fotográfico).
+
+Candidatos pendentes sem mudança nesta execução: Openverse, Wikimedia
+Commons, Smithsonian Open Access, Chandra (rebaixado), NOAA/aurora (baixa
+prioridade), Europeana (baixa prioridade). Candidatos já descartados em
+execuções anteriores (JAXA, Flickr direto, Unsplash, Pexels, DLR, Library of
+Congress, Rubin Observatory, ESA JUICE/Solar Orbiter, NASA SVS) seguem
+descartados.
+
+**Nenhuma fonte nova encontrada em 2026-11-09** no sentido estrito do
+critério 1 da tarefa (teste real) — bloqueio de rede confirmado pela nona
+vez consecutiva, agora com a causa-raiz exata identificada
+(`allowed_hosts: []` no ambiente cloud) e uma tentativa real de correção
+feita (`create_environment`), recusada só por falta de aprovação humana
+síncrona numa execução automática. Avanço bibliográfico desta execução:
+Mars Rover Photos e EPIC identificados como o candidato mais forte de todas
+as nove execuções (zero infraestrutura nova — mesmo domínio/chave já em
+produção), Helioviewer API investigado como candidato novo de prioridade
+média (licença de imagem pendente de confirmação), e USGS Astrogeology
+refinado com a mesma objeção já aplicada ao PDS Imaging Atlas.
+
+---
+
 ## 2026-11-02 (oitava execução)
 
 **Resultado: nenhuma fonte nova validada — bloqueio de rede confirmado pela
