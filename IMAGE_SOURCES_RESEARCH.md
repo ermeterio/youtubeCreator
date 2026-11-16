@@ -6,6 +6,90 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-11-16 (décima execução)
+
+**Resultado: nenhuma fonte nova validada por teste real (critério 1) — bloqueio
+de rede confirmado pela décima execução consecutiva (mais de 2 meses). Mesmo
+estado exato da nona execução, reconfirmado com testes novos.**
+
+### Reconfirmação do bloqueio
+- `get_environment` desta execução devolve exatamente o mesmo estado já
+  registrado na 9ª execução: ambiente "Default" (pessoal, usado por todas as
+  sessões), `network.type = "limited"`, **`allowed_hosts: []`**,
+  `saved_for_session_repositories: []`. Nada mudou.
+- Teste real novo (`WebFetch` + `curl --cacert /root/.ccr/ca-bundle.crt`) contra
+  domínios que já estão em produção no código (`api.nasa.gov`,
+  `images-api.nasa.gov`) confirma que mesmo essas fontes já aceitas falham
+  nesta sessão: `WebFetch` → `getaddrinfo ENOTFOUND api.nasa.gov`; `curl` →
+  `CONNECT tunnel failed, response 403` / proxy status reporta
+  `connect_rejected` para ambos os hosts. `$HTTPS_PROXY/__agentproxy/status`
+  mostra `"selective": false` (bloqueio geral, não allowlist incompleta) —
+  igual às dez execuções.
+- Não tentei `create_environment`/`update_environment` de novo nesta execução:
+  a 9ª execução já testou isso e recebeu recusa explícita por falta de
+  aprovação humana síncrona, com instrução direta de registrar o bloqueio em
+  vez de tentar contornar de novo numa execução automática. Ação necessária do
+  usuário é a mesma de sempre (ver abaixo), sem novidade a acrescentar.
+
+### AstroPix (astropix.org / astropix.ipac.caltech.edu) — candidato novo, pendente de teste real
+Encontrado via `WebSearch` (não citado em nenhuma das nove execuções
+anteriores). É um agregador de imagens de divulgação astronômica operado pelo
+IPAC/Caltech, que indexa metadados **AVM (Astronomy Visualization Metadata)**
+de várias fontes — a mesma convenção de metadado usada pela plataforma já em
+produção (ESA/Hubble, ESA/Webb, ESO, NOIRLab), mas agregando também outros
+observatórios (ex.: Chandra, Spitzer, STScI) que hoje não têm API de busca
+própria integrada ao pipeline.
+- **API**: a página `astropix.org/page/developers` (resumo via WebSearch, não
+  lida com teste real) descreve duas APIs simples baseadas em permalinks de
+  busca avançada — qualquer busca avançada do site pode ser usada como
+  chamada de API, devolvendo XML ou JSON. A página `astropix.org/page/searching`
+  descreve parâmetros de busca por texto/nome de objeto via `name` ou `q`.
+  Não há URL de exemplo completa confirmada nos resultados de busca; a
+  documentação completa fica em `astropix.ipac.caltech.edu`.
+- **Teste real**: impossível nesta execução pelo mesmo bloqueio de rede —
+  `WebFetch` em `https://www.astropix.org/page/developers` e
+  `https://www.astropix.org/page/searching` → `getaddrinfo ENOTFOUND
+  www.astropix.org`, mesmo padrão dos outros hosts.
+- **Licença — ressalva importante**: por ser um agregador de múltiplas fontes,
+  a licença não é uniforme por definição — cada item herda a licença do
+  observatório de origem (algumas já conhecidas como CC BY 4.0, outras podem
+  ser diferentes). Precisa confirmar, quando testável, que o registro
+  retornado pela API inclui um campo de licença por item (não só crédito/texto
+  livre), senão não dá pra aplicar o filtro de licença automaticamente por
+  fonte - mesmo cuidado que se aplicaria a qualquer agregador.
+- **Relevância pro nicho**: alta (é especificamente um catálogo de imagens de
+  divulgação astronômica/espacial).
+- **Integração esperada** (não testada): se o campo de licença por item for
+  confiável, uma função `fetch_astropix_images_for_topic(query, count)` no
+  mesmo padrão dos outros `fetch_*_images_for_topic`, filtrando por licença
+  permissiva (descartar item sem CC BY/CC0/domínio público claro) antes de
+  baixar.
+- **Prioridade**: candidato novo, prioridade média — atrás de Mars Rover
+  Photos/EPIC (sem licença ambígua, mesmo domínio/chave já em produção), na
+  frente de Helioviewer (que também tem licença pendente de confirmação) por
+  cobrir mais fontes de uma vez se a hipótese da licença por item se
+  confirmar.
+
+Sem mudança nos demais candidatos pendentes (Mars Rover Photos/EPIC no topo da
+fila, Helioviewer, Openverse, Smithsonian Open Access, USGS
+Astrogeology/STAC, Chandra, NOAA/aurora, Europeana) nem nos já descartados
+(JAXA, Flickr direto, Unsplash, Pexels, DLR, Library of Congress, Rubin
+Observatory, ESA JUICE/Solar Orbiter, NASA SVS, DONKI).
+
+**Nenhuma fonte nova encontrada em 2026-11-16** no sentido estrito do
+critério 1 (teste real) — bloqueio de rede confirmado pela décima vez
+consecutiva, estado idêntico ao da 9ª execução. Avanço bibliográfico desta
+execução: AstroPix identificado como candidato novo (agregador multi-fonte
+AVM), pendente de teste real e de confirmação de licença por item.
+
+Ação necessária do usuário, igual às nove execuções anteriores: abrir esta
+rotina manualmente numa sessão interativa e aprovar a criação/troca de
+ambiente, ou adicionar os hosts de produção e pendentes à allowlist do
+ambiente "Default" (ou de um ambiente dedicado a este repositório) em
+Settings do ambiente cloud.
+
+---
+
 ## 2026-11-09 (nona execução)
 
 **Resultado: nenhuma fonte nova validada por teste real (critério 1 segue
