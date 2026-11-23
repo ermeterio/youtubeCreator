@@ -6,6 +6,92 @@ uma seção no topo, sem apagar as anteriores.
 
 ---
 
+## 2026-11-23 (décima primeira execução)
+
+**Resultado: nenhuma fonte nova validada por teste real (critério 1) —
+bloqueio de rede confirmado pela décima primeira execução consecutiva (mais
+de 7 semanas). Mesmo estado exato da 9ª/10ª execução, reconfirmado com
+testes novos; incremento bibliográfico pequeno (AstroPix, MAST).**
+
+### Reconfirmação do bloqueio
+- `get_environment` desta execução devolve o mesmo estado já registrado nas
+  duas execuções anteriores: ambiente "Default" (pessoal, usado por todas as
+  sessões), `network.type = "limited"`, **`allowed_hosts: []`**,
+  `saved_for_session_repositories: []`. Nada mudou.
+- Teste real novo: `WebFetch` em `https://images-api.nasa.gov/search?...`
+  (fonte já em produção) e em `https://en.wikipedia.org/...` (domínio
+  genérico, não relacionado a nenhum candidato) → ambos
+  `getaddrinfo ENOTFOUND`. `curl --cacert /root/.ccr/ca-bundle.crt` contra
+  `images-api.nasa.gov` (via Bash) → timeout/sem resposta (`000`).
+  `$HTTPS_PROXY/__agentproxy/status` confirma `"selective": false` e
+  registra `images-api.nasa.gov:443` em `recentRelayFailures` como
+  `connect_rejected` / "gateway answered 403 to CONNECT (policy denial or
+  other refusal)" — mesmo padrão geral das dez execuções anteriores.
+- **Diferença notada nesta execução**: `WebSearch` continua funcionando
+  normalmente (não passa pelo mesmo proxy de egress restrito por host, ou
+  usa infraestrutura própria da Anthropic) — permite pesquisa bibliográfica
+  mesmo com o bloqueio, mas não permite o teste real de endpoint exigido
+  pelo critério 1 da tarefa (que exige WebFetch/curl contra a API de
+  verdade).
+- Não tentei `create_environment` de novo nesta execução: a 9ª execução já
+  tentou isso e recebeu recusa explícita por falta de aprovação humana
+  síncrona, com instrução direta do próprio host de registrar o bloqueio em
+  vez de tentar contornar de novo numa execução automática. Ação necessária
+  do usuário é a mesma de sempre (ver abaixo), sem novidade a acrescentar.
+
+### AstroPix — pequeno refinamento (ainda sem teste real, formato de API ainda incompleto)
+Candidato identificado na 10ª execução (agregador AVM multi-fonte operado
+por IPAC/Caltech). `WebSearch` desta execução confirma o host real da API
+(`astropix.ipac.caltech.edu`, distinto do site institucional
+`astropix.org`/`www.astropix.org`) e o padrão de busca por nome de objeto —
+`search?q=<nome>` ou `search?name=<nome>` — e por coordenadas
+(`search?ra=<graus>&dec=<graus>&radius=<graus>`). **Não foi possível
+confirmar o parâmetro exato que força saída JSON** (a documentação indica
+que a página de resultado de uma busca mostra links "XML"/"JSON" no topo,
+mas nenhum resultado de busca mostrou a URL completa desses links, ex.
+`format=json` ou caminho separado). `WebFetch` em `www.astropix.org/page/5`
+(página "For Developers") falhou pelo mesmo bloqueio de rede
+(`getaddrinfo ENOTFOUND`), então a doc completa segue não lida de verdade.
+**Sem mudança de prioridade** (candidato novo, prioridade média, mesma
+posição da 10ª execução) — ainda pendente de teste real e de confirmação de
+licença por item antes de qualquer integração.
+
+### MAST (Mikulski Archive for Space Telescopes, STScI) — investigado, mesma objeção do USGS/PDS
+Pista nova desta execução via `WebSearch`: STScI opera várias APIs REST sob
+o guarda-chuva MAST (`mast.stsci.edu/api`, `catalogs.mast.stsci.edu`,
+`z.mast.stsci.edu`) para dados do Hubble/JWST/Kepler/TESS, a maioria
+acessível sem chave para dados públicos, retornando JSON. **Mesma objeção já
+registrada pro PDS Imaging Atlas e pro USGS Astrogeology/STAC**: é arquivo
+de dados científicos brutos (observações/catálogos, não fotos de divulgação
+prontas) — um "jpegURL" aparece mencionado em resultado de busca de terceiro
+(não confirmado em doc oficial), o que sugeriria preview JPEG por
+observação, mas isso ainda seria imagem técnica de instrumento (ex. campo de
+visão de um espectrógrafo), não uma foto de divulgação equivalente às já
+usadas (ESA/Hubble, ESO, NOIRLab). **Descartado para o propósito deste
+pipeline** pelo mesmo motivo do PDS/USGS — vale revisitar só se algum dia o
+pipeline precisar de dado científico bruto em vez de imagem de divulgação.
+
+Sem mudança nos demais candidatos pendentes (Mars Rover Photos/EPIC no topo
+da fila, Helioviewer, Openverse, Smithsonian Open Access, USGS
+Astrogeology/STAC, Chandra, NOAA/aurora, Europeana) nem nos já descartados
+(JAXA, Flickr direto, Unsplash, Pexels, DLR, Library of Congress, Rubin
+Observatory, ESA JUICE/Solar Orbiter, NASA SVS, DONKI).
+
+**Nenhuma fonte nova encontrada em 2026-11-23** no sentido estrito do
+critério 1 (teste real) — bloqueio de rede confirmado pela décima primeira
+vez consecutiva, estado idêntico ao da 9ª/10ª execução. Avanço bibliográfico
+desta execução: AstroPix com host de API confirmado (mas formato JSON ainda
+não confirmado) e MAST/STScI investigado e descartado (dado científico
+bruto, mesma objeção do USGS/PDS).
+
+Ação necessária do usuário, igual às dez execuções anteriores: abrir esta
+rotina manualmente numa sessão interativa e aprovar a criação/troca de
+ambiente, ou adicionar os hosts de produção e pendentes à allowlist do
+ambiente "Default" (ou de um ambiente dedicado a este repositório) em
+Settings do ambiente cloud.
+
+---
+
 ## 2026-11-16 (décima execução)
 
 **Resultado: nenhuma fonte nova validada por teste real (critério 1) — bloqueio
